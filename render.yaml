@@ -1,0 +1,65 @@
+# Render Blueprint: two free web services. Secrets are entered in the Render
+# dashboard (sync: false) and never stored in Git. See docs/DEPLOYMENT.md.
+services:
+  - type: web
+    name: ai-mock-interview-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    # Migrations are applied by the documented step in docs/DEPLOYMENT.md
+    # (scripts/migrate.sh). /api/v1/ready stays 503 until the schema is current,
+    # so Render won't route traffic to a backend with an outdated schema.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"
+    healthCheckPath: /api/v1/ready
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_TEXT_MODEL
+        value: gemini-3.5-flash-lite
+      - key: GEMINI_EVALUATION_MODEL
+        value: gemini-3.5-flash-lite
+      - key: GEMINI_LIVE_MODEL
+        value: gemini-3.8-live
+      - key: GEMINI_LIVE_API_VERSION
+        value: v1alpha
+      - key: DAILY_INTERVIEW_LIMIT
+        value: "5"
+      - key: RUN_WORKER
+        value: "true"
+
+  - type: web
+    name: ai-mock-interview-web
+    runtime: node
+    plan: free
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+      - key: NEXT_PUBLIC_RECORDING_MAX_BYTES
+        value: "52428800"

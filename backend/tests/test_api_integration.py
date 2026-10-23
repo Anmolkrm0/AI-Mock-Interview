@@ -191,8 +191,7 @@ async def test_parse_failure_then_retry_and_correction(client, fakes) -> None:
     registry.text.queue = [timeout_error()] * 3
     r = await client.post("/api/v1/documents/job-description", headers=auth(user), data={"text": JD})
     assert r.status_code == 504 and r.json()["error"]["retryable"] is True
-    async with get_sessionmaker()() as db:
-        doc_id = (await db.execute(text("select id from documents"))).scalar_one()
+    doc_id = r.json()["error"]["details"]["document_id"]
     r = await client.get(f"/api/v1/documents/{doc_id}", headers=auth(user))
     assert r.json()["parsing_status"] == "failed"
     r = await client.post(f"/api/v1/documents/{doc_id}/parse", headers=auth(user))
@@ -836,3 +835,39 @@ async def test_error_shape_has_no_internals(client) -> None:
     assert "Traceback" not in r.text and "sqlalchemy" not in r.text.lower()
     r = await client.get("/api/v1/interviews/not-a-uuid", headers=auth(uuid.uuid4()))
     assert r.status_code == 422 and r.json()["error"]["code"] == "VALIDATION_FAILED"
+
+
+# ------------------------------------------------------------------ frontend contract
+
+
+async def test_frontend_conductor_event_stream_is_accepted(client, fakes) -> None:
+    """Replay the exact event stream produced by the frontend InterviewConductor
+    (captured from frontend/tests/unit/conductor.test.ts) against the real backend."""
+    import json
+    from pathlib import Path
+
+    stream = json.loads((Path(__file__).parent / "fixtures_conductor_events.json").read_text())
+    user = uuid.uuid4()
+    iid, detail = await ready_interview(client, user)
+    ids = {f"q{q['sequence_number']}": q["id"] for q in detail["questions"]}
+    r = await client.post(f"/api/v1/interviews/{iid}/live-token", headers=auth(user))
+    assert r.status_code == 200
+    for event in stream:
+        if event.get("question_id"):
+            event["question_id"] = ids[event["question_id"]]
+        r = await client.post(
+            f"/api/v1/interviews/{iid}/events", headers=auth(user), json={"events": [event]}
+        )
+        assert r.status_code == 200, (event["event_type"], r.text)
+    r = await client.post(
+        f"/api/v1/interviews/{iid}/complete", headers=auth(user), json={"reason": "user_ended"}
+    )
+    assert r.json()["status"] == "evaluating"
+    await drain_jobs(fakes)
+    report = (await client.get(f"/api/v1/interviews/{iid}/report", headers=auth(user))).json()
+    scored = {q["sequence_number"]: q for q in report["question_evaluations"]}
+    assert set(scored) == {1, 3}
+    assert scored[3]["answer_transcript"] == "Second try, much clearer." and scored[3]["attempts_total"] == 2
+    assert any(
+        u["reason"] == "skipped" and u["sequence_number"] == 2 for u in report["unevaluated_questions"]
+    )

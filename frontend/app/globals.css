@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+/*
+  Visual identity: "the rehearsal room".
+  Cool paper, deep ink, and a highlighter reserved for one job: marking evidence
+  in a transcript. Nothing else on the site is yellow.
+*/
+@theme {
+  --color-paper: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-ink: #16213a;
+  --color-ink-soft: #2b3a5c;
+  --color-slate: #5b6578;
+  --color-line: #dde1e8;
+  --color-line-strong: #c3c9d4;
+  --color-mark: #f5d547;
+  --color-mark-soft: #fbedb0;
+  --color-signal: #b42318;
+  --color-signal-soft: #fdecea;
+  --color-go: #1f7a4d;
+  --color-go-soft: #e4f3ea;
+  --color-wait: #8a5a00;
+
+  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-plex), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  body {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    line-height: 1.08;
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  :focus-visible {
+    outline: 3px solid var(--color-ink);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: var(--color-mark-soft);
+  }
+}
+
+/* The highlighter: used only for evidence in transcripts. */
+.mark-evidence {
+  background: linear-gradient(
+    to bottom,
+    transparent 0 12%,
+    var(--color-mark) 12% 88%,
+    transparent 88%
+  );
+  padding: 0 0.15em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.mark-draw {
+  background-size: 0% 100%;
+  background-repeat: no-repeat;
+  background-image: linear-gradient(var(--color-mark), var(--color-mark));
+  animation: mark-draw 900ms 600ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+  padding: 0 0.15em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+@keyframes mark-draw {
+  to {
+    background-size: 100% 100%;
+  }
+}
+
+dialog::backdrop {
+  background: rgb(22 33 58 / 0.45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mark-draw {
+    animation: none;
+    background-size: 100% 100%;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

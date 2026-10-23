@@ -1,0 +1,130 @@
+[
+ {
+  "client_event_id": "807aa6714fd44bd1824d0c402f90ad02",
+  "event_type": "session_started"
+ },
+ {
+  "client_event_id": "5a5de0acbef142ab81eee4339307f55c",
+  "event_type": "question_asked",
+  "question_id": "q1"
+ },
+ {
+  "client_event_id": "a8b6bb8a017047dd8394531bd6a12696",
+  "event_type": "transcript_segment",
+  "speaker": "interviewer",
+  "text": "Tell me about question one?",
+  "question_id": "q1"
+ },
+ {
+  "client_event_id": "7c677873306343fdbc601a820077962d",
+  "event_type": "transcript_segment",
+  "speaker": "candidate",
+  "text": "I built a payments API with Redis caching.",
+  "question_id": "q1"
+ },
+ {
+  "client_event_id": "892663996845438a9e90b8e9e31d029f",
+  "event_type": "transcript_segment",
+  "speaker": "interviewer",
+  "text": "Thanks.",
+  "question_id": "q1"
+ },
+ {
+  "client_event_id": "161ce5823b7d4052bae959391d1348ae",
+  "event_type": "answer_submitted",
+  "question_id": "q1",
+  "answer_source": "voice",
+  "transcript_text": "I built a payments API with Redis caching.",
+  "exchange": [
+   {
+    "speaker": "interviewer",
+    "text": "Tell me about question one?"
+   },
+   {
+    "speaker": "candidate",
+    "text": "I built a payments API with Redis caching."
+   },
+   {
+    "speaker": "interviewer",
+    "text": "Thanks."
+   }
+  ]
+ },
+ {
+  "client_event_id": "ed7a37f0c0b14ea888de02e6081bde2f",
+  "event_type": "question_asked",
+  "question_id": "q2"
+ },
+ {
+  "client_event_id": "08d3af7410cd4be99d58178bd0298994",
+  "event_type": "question_skipped",
+  "question_id": "q2"
+ },
+ {
+  "client_event_id": "48ecdf5832bd4227bcb73a763ce65759",
+  "event_type": "question_asked",
+  "question_id": "q3"
+ },
+ {
+  "client_event_id": "ff75f277c72a42a1a3ac1b8e5d36757c",
+  "event_type": "transcript_segment",
+  "speaker": "candidate",
+  "text": "My typed answer for three",
+  "question_id": "q3"
+ },
+ {
+  "client_event_id": "eb14ab131db8436da6f40bb83f742bcf",
+  "event_type": "answer_submitted",
+  "question_id": "q3",
+  "answer_source": "text",
+  "transcript_text": "My typed answer for three",
+  "exchange": [
+   {
+    "speaker": "candidate",
+    "text": "My typed answer for three"
+   }
+  ]
+ },
+ {
+  "client_event_id": "66839df6ed4348408842051696170656",
+  "event_type": "answer_retake",
+  "question_id": "q3"
+ },
+ {
+  "client_event_id": "ba242f0729c8420dbe0c8778c3b20ae4",
+  "event_type": "connection_lost",
+  "reason": "network"
+ },
+ {
+  "client_event_id": "838d7fce272d48499dfe84895214500d",
+  "event_type": "paused"
+ },
+ {
+  "client_event_id": "21cf2b36c55c4f6d9a44e6610efa1e0a",
+  "event_type": "reconnected"
+ },
+ {
+  "client_event_id": "92b062d1b4584ac2804ea5186e470223",
+  "event_type": "resumed"
+ },
+ {
+  "client_event_id": "8d5d567e7da74343b41c72b6456e46a5",
+  "event_type": "transcript_segment",
+  "speaker": "candidate",
+  "text": "Second try, much clearer.",
+  "question_id": "q3"
+ },
+ {
+  "client_event_id": "8259d4ddd4db46e384cb1d357f969fee",
+  "event_type": "answer_submitted",
+  "question_id": "q3",
+  "answer_source": "voice",
+  "transcript_text": "Second try, much clearer.",
+  "exchange": [
+   {
+    "speaker": "candidate",
+    "text": "Second try, much clearer."
+   }
+  ]
+ }
+]

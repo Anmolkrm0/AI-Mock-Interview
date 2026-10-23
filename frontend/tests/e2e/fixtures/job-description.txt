@@ -1,0 +1,14 @@
+Senior Backend Engineer (Payments)
+
+We are looking for a Senior Backend Engineer to own core payment services. You will design APIs, improve reliability and performance, and mentor engineers.
+
+Responsibilities:
+- Design, build and operate Python services for payments and reconciliation.
+- Improve latency, reliability and observability of high-traffic APIs.
+- Lead technical design reviews and mentor junior engineers.
+
+Requirements:
+- 4+ years building backend systems in Python.
+- Strong SQL and PostgreSQL experience; caching with Redis.
+- Experience with distributed systems, queues and failure handling.
+Nice to have: Kubernetes, AWS, payments domain knowledge.

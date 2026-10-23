@@ -303,6 +303,8 @@ async def run_parse(*, db: AsyncSession, provider: TextGenerationProvider, doc: 
         doc.parsing_status = "failed"
         doc.parsing_error = exc.code
         await db.commit()
+        # Lets the client retry parsing without uploading the file again.
+        exc.details = {**exc.details, "document_id": str(doc.id)}
         raise
     doc.extracted_data = data
     doc.parsing_status = "parsed"
