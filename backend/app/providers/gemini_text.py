@@ -9,6 +9,7 @@ re-validated with Pydantic by the calling service.
 from __future__ import annotations
 
 import json
+import logging
 import time
 
 import httpx
@@ -26,6 +27,8 @@ from app.providers.base import (
     timeout_error,
 )
 from app.providers.json_schema import inline_schema, parse_json_object, schema_prompt
+
+logger = logging.getLogger("app.providers.gemini_text")
 
 
 class GeminiTextProvider(TextGenerationProvider):
@@ -90,12 +93,18 @@ class GeminiTextProvider(TextGenerationProvider):
                 raise timeout_error() from exc
             except httpx.HTTPError as exc:
                 raise map_http_error(503, type(exc).__name__, "Gemini") from exc
-            if response.status_code == 400 and with_schema and "schema" in response.text.lower():
+            if response.status_code == 400 and with_schema:
                 # Model rejected the schema form; fall back to prompt-embedded schema.
+                msg = _error_message(response)[:500].replace("\n", " ")
+                logger.warning(
+                    "gemini_schema_rejected_fallback status=%s message=%s", response.status_code, msg
+                )
                 with_schema = False
                 continue
             break
         if response.status_code >= 400:
+            msg = _error_message(response)[:500].replace("\n", " ")
+            logger.warning("gemini_http_error status=%s message=%s", response.status_code, msg)
             raise map_http_error(response.status_code, _error_message(response), "Gemini")
 
         payload = response.json()

@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.core.errors import AppError, ConfigurationError, ValidationFailed
+from app.core.errors import AppError, ConfigurationError, StorageError, ValidationFailed
 from app.models import Document
 from app.providers.base import TextGenerationProvider
 from app.schemas.documents import JobExtraction, ResumeExtraction
@@ -270,8 +270,17 @@ async def ingest_document(
     )
     if file is not None:
         path = f"{user_id}/{doc.id}/{file.file_name}"
-        await storage.upload(settings.documents_bucket, path, file.data, file.mime_type)
-        doc.storage_path = path
+        try:
+            await storage.upload(settings.documents_bucket, path, file.data, file.mime_type)
+            doc.storage_path = path
+        except (StorageError, ConfigurationError) as exc:
+            logger.warning(
+                "document_original_storage_failed doc_id=%s user_id=%s error=%s",
+                doc.id,
+                user_id,
+                exc,
+            )
+            doc.storage_path = None
     db.add(doc)
     await db.commit()
 

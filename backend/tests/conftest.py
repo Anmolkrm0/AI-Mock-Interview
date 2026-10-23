@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
+import getpass
 import os
+import socket
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -20,7 +22,17 @@ from collections.abc import AsyncIterator
 import jwt
 import pytest
 
-TEST_DB = os.environ.get("TEST_DATABASE_URL", "postgresql://postgres@127.0.0.1:54329/mock_interview_test")
+
+def _default_test_db() -> str:
+    user = getpass.getuser()
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        if s.connect_ex(("127.0.0.1", 5432)) == 0:
+            return f"postgresql://{user}@127.0.0.1:5432/mock_interview_test"
+    return "postgresql://postgres@127.0.0.1:54329/mock_interview_test"
+
+
+TEST_DB = os.environ.get("TEST_DATABASE_URL") or _default_test_db()
 JWT_SECRET = "test-jwt-secret-that-is-long-enough-for-hs256"
 SUPABASE_URL = "https://example-project.supabase.co"
 

@@ -17,7 +17,9 @@ from app.providers.base import LiveFunction, LiveSessionSetup
 from app.providers.gemini_live import GeminiLiveProvider
 from app.providers.gemini_text import GeminiTextProvider
 from app.providers.groq_text import GroqTextProvider
+from app.providers.json_schema import inline_schema
 from app.schemas.documents import JobExtraction
+from app.schemas.plan import InterviewPlanDraft
 from app.services import ai_calls
 
 SETTINGS = Settings(
@@ -78,6 +80,43 @@ async def test_gemini_schema_fallback() -> None:
     result = await p.generate_json(system="s", prompt="p", schema=JobExtraction)
     assert len(calls) == 2 and "JSON Schema" in calls[1]["contents"][0]["parts"][0]["text"]
     assert result.data["job_title"] == "Analyst"
+
+
+async def test_gemini_schema_fallback_generic_400_without_schema_in_message() -> None:
+    calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        if "responseJsonSchema" in body["generationConfig"]:
+            # Real Gemini 400 error does NOT mention "schema":
+            return httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "status": "INVALID_ARGUMENT",
+                        "message": "Request contains an invalid argument.",
+                    }
+                },
+            )
+        return _gemini_ok('```json\n{"job_title": "Analyst"}\n```')
+
+    p = GeminiTextProvider(SETTINGS)
+    _with_transport(p, handler)
+    result = await p.generate_json(system="s", prompt="p", schema=JobExtraction)
+    assert len(calls) == 2
+    assert "responseJsonSchema" not in calls[1]["generationConfig"]
+    assert "JSON Schema" in calls[1]["contents"][0]["parts"][0]["text"]
+    assert result.data["job_title"] == "Analyst"
+
+
+def test_inline_schema_interview_plan_draft_gemini_compatible() -> None:
+    sch = inline_schema(InterviewPlanDraft)
+    sch_json = json.dumps(sch)
+    assert "exclusiveMinimum" not in sch_json
+    assert "exclusiveMaximum" not in sch_json
+    assert "$ref" not in sch_json
+    assert "$defs" not in sch
 
 
 @pytest.mark.parametrize(

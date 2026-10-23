@@ -44,7 +44,7 @@ describe("api client", () => {
         error: { code: "ANSWER_ALREADY_RECORDED", message: "Use retake.", retryable: false, request_id: "r1" },
       }),
     );
-    const err = await api("/x", { method: "POST" }).catch((e) => e);
+    const err = (await api("/x", { method: "POST" }).catch((e) => e)) as ApiError;
     expect(err).toBeInstanceOf(ApiError);
     expect(err.code).toBe("ANSWER_ALREADY_RECORDED");
     expect(err.requestId).toBe("r1");
@@ -66,7 +66,7 @@ describe("api client", () => {
 
   it("does not retry non-idempotent POSTs by default", async () => {
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
-    const err = await api("/x", { method: "POST" }).catch((e) => e);
+    const err = (await api("/x", { method: "POST" }).catch((e) => e)) as ApiError;
     expect(err.code).toBe("NETWORK_ERROR");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

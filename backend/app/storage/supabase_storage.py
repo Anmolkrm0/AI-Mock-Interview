@@ -58,11 +58,10 @@ class SupabaseStorage:
     def __init__(self, base_url: str, secret_key: str, timeout: float = 30.0) -> None:
         self._base = base_url.rstrip("/") + "/storage/v1"
         self._public_base = self._base
-        headers = {"apikey": secret_key}
-        # Legacy service_role keys are JWTs and also go in Authorization;
-        # new sb_secret_ keys are accepted via the apikey header.
-        if secret_key.startswith("eyJ"):
-            headers["Authorization"] = f"Bearer {secret_key}"
+        headers = {
+            "apikey": secret_key,
+            "Authorization": f"Bearer {secret_key}",
+        }
         self._client = httpx.AsyncClient(headers=headers, timeout=timeout)
 
     async def _request(self, method: str, url: str, **kwargs: object) -> httpx.Response:
@@ -72,7 +71,8 @@ class SupabaseStorage:
             logger.warning("storage_transport_error type=%s", type(exc).__name__)
             raise StorageError() from exc
         if response.status_code >= 400:
-            logger.warning("storage_http_error status=%s", response.status_code)
+            body_snippet = response.text[:300].replace("\n", " ")
+            logger.warning("storage_http_error status=%s body=%s", response.status_code, body_snippet)
             raise StorageError(
                 "File storage rejected the request.",
                 code="STORAGE_REJECTED",

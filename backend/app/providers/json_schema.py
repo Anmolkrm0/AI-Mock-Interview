@@ -9,7 +9,16 @@ from typing import Any
 
 from pydantic import BaseModel
 
-_DROP_KEYS = {"title", "default", "examples"}
+_DROP_KEYS = {
+    "title",
+    "default",
+    "examples",
+    "minItems",
+    "maxItems",
+    "minLength",
+    "maxLength",
+    "pattern",
+}
 
 
 def inline_schema(model: type[BaseModel]) -> dict[str, Any]:
@@ -22,7 +31,17 @@ def inline_schema(model: type[BaseModel]) -> dict[str, Any]:
             if "$ref" in node:
                 name = node["$ref"].split("/")[-1]
                 return resolve(copy.deepcopy(defs[name]))
-            return {k: resolve(v) for k, v in node.items() if k not in _DROP_KEYS}
+            cleaned: dict[str, Any] = {}
+            for k, v in node.items():
+                if k in _DROP_KEYS:
+                    continue
+                if k == "exclusiveMinimum":
+                    cleaned["minimum"] = v
+                elif k == "exclusiveMaximum":
+                    cleaned["maximum"] = v
+                else:
+                    cleaned[k] = resolve(v)
+            return cleaned
         if isinstance(node, list):
             return [resolve(v) for v in node]
         return node

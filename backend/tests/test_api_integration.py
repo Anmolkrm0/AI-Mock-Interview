@@ -20,6 +20,7 @@ from app.db.session import get_sessionmaker
 from app.models import (
     AIUsage,
     AnswerAttempt,
+    Document,
     EvaluationJob,
     Interview,
     InterviewPlan,
@@ -160,6 +161,24 @@ async def test_document_upload_and_parse(client, fakes) -> None:
         "/api/v1/roles/detect", headers=auth(user), json={"job_description_document_id": jd["id"]}
     )
     assert r.json()["default_role"] == "Senior Backend Engineer"
+
+
+async def test_document_upload_succeeds_when_storage_fails(client, fakes) -> None:
+    _, storage = fakes
+    storage.fail_upload = True
+    user = uuid.uuid4()
+    r = await client.post(
+        "/api/v1/documents/resume",
+        headers=auth(user),
+        files={"file": ("resume.docx", docx_bytes(RESUME), DOCX_MIME)},
+    )
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["parsing_status"] == "parsed"
+
+    async with get_sessionmaker()() as db:
+        doc = (await db.execute(select(Document).where(Document.id == uuid.UUID(data["id"])))).scalar_one()
+        assert doc.storage_path is None
 
 
 async def test_invalid_files_rejected_before_ai(client, fakes) -> None:

@@ -204,6 +204,7 @@ class FakeStorage:
 
     def __init__(self) -> None:
         self.objects: dict[tuple[str, str], tuple[bytes, str]] = {}
+        self.fail_upload = False
         self.fail_delete = False
         self.deleted: list[str] = []
 
@@ -222,6 +223,8 @@ class FakeStorage:
         return ObjectInfo(path=path, size=len(data), mime_type=mime)
 
     async def upload(self, bucket: str, path: str, data: bytes, content_type: str) -> None:
+        if self.fail_upload:
+            raise StorageError("upload failed", code="STORAGE_REJECTED")
         self.objects[(bucket, path)] = (data, content_type)
 
     async def delete(self, bucket: str, paths: list[str]) -> None:

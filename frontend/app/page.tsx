@@ -194,13 +194,10 @@ export default function LandingPage() {
             <div className="mt-12 flex flex-wrap items-center gap-4">
               <Link
                 href="/interview/setup"
-                className={buttonVariants({ size: "lg", className: "bg-white text-ink hover:bg-paper" })}
+                className={cn(buttonVariants({ size: "lg" }), "bg-white text-ink hover:bg-paper")}
               >
                 Start an interview
               </Link>
-              <p className="text-sm text-white/70">
-                Each account can run a few interviews a day, so the shared AI quota lasts for everyone.
-              </p>
             </div>
           </div>
         </section>
