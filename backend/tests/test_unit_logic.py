@@ -14,7 +14,7 @@ from app.core.logging import redact
 from app.providers.base import map_http_error
 from app.schemas.documents import JobExtraction, RoleSuggestion
 from app.schemas.interviews import InterviewCreate
-from app.schemas.plan import InterviewPlanDraft
+from app.schemas.plan import InterviewPlanDraft, PlanQuestion
 from app.schemas.report import QuestionJudgement
 from app.services import document_service
 from app.services.evaluation_service import (
@@ -26,6 +26,7 @@ from app.services.evaluation_service import (
 )
 from app.services.interview_planner import fit_time_allocations, question_budget
 from app.services.interview_service import can_transition, transition
+from app.services.live_ai_service import build_system_instruction
 from app.services.role_detection_service import detect_roles
 
 # ------------------------------------------------------------- state machine
@@ -158,6 +159,88 @@ def test_time_allocations_fit_budget() -> None:
     fit_time_allocations(draft, 1110)
     core_total = sum(q.time_allocation_seconds for q in draft.questions if q.priority == "core")
     assert abs(core_total - 1110) <= 4
+
+
+def test_plan_question_rejects_multiple_question_marks() -> None:
+    with pytest.raises(ValueError, match="at most one"):
+        PlanQuestion(
+            question="What is your favorite project? Why did you choose it?",
+            category="technical",
+            competency="Coding",
+            difficulty=3,
+            expected_evidence=["evidence"],
+            time_allocation_seconds=120,
+        )
+
+
+def test_plan_question_rejects_over_220_characters() -> None:
+    long_question = "Explain " + "x" * 215 + "?"
+    assert len(long_question) > 220
+    with pytest.raises(ValueError):
+        PlanQuestion(
+            question=long_question,
+            category="technical",
+            competency="Coding",
+            difficulty=3,
+            expected_evidence=["evidence"],
+            time_allocation_seconds=120,
+        )
+
+
+def test_plan_question_accepts_valid_question() -> None:
+    pq = PlanQuestion(
+        question="How do you handle database migrations safely?",
+        category="technical",
+        competency="Coding",
+        difficulty=3,
+        expected_evidence=["evidence"],
+        time_allocation_seconds=120,
+    )
+    assert pq.question == "How do you handle database migrations safely?"
+    assert len(pq.question) <= 220
+    assert pq.question.count("?") <= 1
+
+
+def test_build_system_instruction_contains_short_question_and_clarification_rules() -> None:
+    interview = SimpleNamespace(
+        duration_minutes=20,
+        job_role="Senior Software Engineer",
+        evaluation_rigor="standard",
+    )
+    q1 = SimpleNamespace(
+        sequence_number=1,
+        priority="core",
+        competency="Coding",
+        time_allocation_seconds=120,
+        status="pending",
+        question_text="How do you structure microservices?",
+        follow_up_topics=["scalability"],
+    )
+    instruction = build_system_instruction(
+        interview=interview,  # type: ignore[arg-type]
+        objectives=["Assess backend depth"],
+        questions=[q1],  # type: ignore[arg-type]
+        candidate={"headline": "Backend Engineer"},
+        job_title="Senior Software Engineer",
+        remaining=1200,
+    )
+    assert "Ask each planned question in one or two short sentences." in instruction
+    assert (
+        "Do not add commentary, praise or a summary of the previous answer before the next question; at most say 'Thanks.'"
+        in instruction
+    )
+    assert (
+        "If the candidate asks you to repeat or clarify, answer only what they asked, in one short sentence."
+        in instruction
+    )
+    assert (
+        "For example, if they ask for the second part, say only the second part. Never re-read the whole question unless they ask for the whole question, and never repeat earlier questions."
+        in instruction
+    )
+    assert (
+        "Keep your own turns short: acknowledgements are 3 to 6 words. Then stop and let the candidate speak."
+        in instruction
+    )
 
 
 # ------------------------------------------------------------- documents

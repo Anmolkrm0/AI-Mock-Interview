@@ -20,7 +20,7 @@ Duration = Literal[10, 20, 30, 45]
 
 
 class PlanQuestion(BaseModel):
-    question: str = Field(min_length=10, max_length=600)
+    question: str = Field(min_length=10, max_length=220)
     category: QuestionCategory
     competency: str = Field(min_length=2, max_length=120)
     difficulty: int = Field(ge=1, le=5)
@@ -28,6 +28,13 @@ class PlanQuestion(BaseModel):
     expected_evidence: list[str] = Field(min_length=1, max_length=6)
     follow_up_topics: list[str] = Field(default_factory=list, max_length=5)
     time_allocation_seconds: int = Field(ge=45, le=900)
+
+    @field_validator("question")
+    @classmethod
+    def _validate_single_question(cls, v: str) -> str:
+        if v.count("?") > 1:
+            raise ValueError("question must contain at most one '?'")
+        return v
 
 
 class CompetencyWeight(BaseModel):
