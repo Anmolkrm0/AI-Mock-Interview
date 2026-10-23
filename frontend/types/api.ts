@@ -303,3 +303,162 @@ export interface FeedbackSummaryOut {
   with_comments: number;
 }
 
+export interface AdminMeOut {
+  admin: boolean;
+}
+
+export interface OverviewUsersOut {
+  total: number;
+  new_in_range: number;
+  active_24h: number;
+  active_7d: number;
+  active_30d: number;
+}
+
+export interface OverviewInterviewsOut {
+  created: number;
+  started: number;
+  completed: number;
+  cancelled: number;
+  failed: number;
+  completion_rate: number;
+}
+
+export interface OverviewAveragesOut {
+  overall_score: number;
+  duration_minutes: number;
+  questions_answered_per_completed: number;
+}
+
+export interface OverviewFeedbackOut {
+  count: number;
+  average_rating: number;
+  rating_counts: Record<number | string, number>;
+}
+
+export interface RoleCount {
+  role: string;
+  count: number;
+}
+
+export interface OverviewBreakdownsOut {
+  by_rigor: Record<string, number>;
+  by_duration: Record<string, number>;
+  top_roles: RoleCount[];
+}
+
+export interface DailySeriesPoint {
+  date: string;
+  new_users: number;
+  interviews_started: number;
+  interviews_completed: number;
+  feedback_count: number;
+}
+
+export interface AIHealthRow {
+  operation: string;
+  model: string;
+  calls: number;
+  failures: number;
+  avg_latency_ms: number;
+}
+
+export interface ErrorCodeRow {
+  error_code: string;
+  count: number;
+}
+
+export interface OverviewHealthOut {
+  ai_usage: AIHealthRow[];
+  top_error_codes: ErrorCodeRow[];
+  connection_lost: number;
+  live_connection_failed: number;
+  recording_upload_failed: number;
+  median_time_to_first_response_ms: number | null;
+}
+
+export interface OverviewLiveNowOut {
+  count: number;
+}
+
+export interface AdminOverviewOut {
+  users: OverviewUsersOut;
+  interviews: OverviewInterviewsOut;
+  averages: OverviewAveragesOut;
+  feedback: OverviewFeedbackOut;
+  breakdowns: OverviewBreakdownsOut;
+  daily_series: DailySeriesPoint[];
+  health: OverviewHealthOut;
+  live_now: OverviewLiveNowOut;
+}
+
+export interface AdminUserSummary {
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+  signed_up_at: string | null;
+  last_sign_in_at: string | null;
+  interviews_total: number;
+  interviews_completed: number;
+  last_interview_at: string | null;
+  average_score: number | null;
+  feedback_count: number;
+}
+
+export interface AdminUserListOut {
+  items: AdminUserSummary[];
+  total: number;
+}
+
+export interface AdminUserInterviewItem {
+  id: string;
+  created_at: string;
+  job_role: string;
+  duration_minutes: number;
+  evaluation_rigor: string;
+  status: string;
+  failure_stage: string | null;
+  failure_code: string | null;
+  overall_score: number | null;
+  feedback_rating: number | null;
+  feedback_comments: string | null;
+}
+
+export interface AdminUserDetailOut {
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+  signed_up_at: string | null;
+  last_sign_in_at: string | null;
+  interviews_total: number;
+  interviews_completed: number;
+  average_score: number | null;
+  feedback_count: number;
+  interviews: AdminUserInterviewItem[];
+}
+
+export interface AdminInterviewItem {
+  id: string;
+  created_at: string;
+  user_id: string;
+  user_email: string | null;
+  job_role: string;
+  duration_minutes: number;
+  evaluation_rigor: string;
+  recording_mode: string;
+  status: string;
+  failure_stage: string | null;
+  failure_code: string | null;
+  questions_total: number;
+  questions_answered: number;
+  questions_skipped: number;
+  overall_score: number | null;
+  feedback_rating: number | null;
+}
+
+export interface AdminInterviewListOut {
+  items: AdminInterviewItem[];
+  total: number;
+}
+
+

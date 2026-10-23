@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import type { AdminMeOut } from "@/types/api";
 
 const baseLinks = [
   { href: "/dashboard", label: "Interviews" },
@@ -20,16 +21,40 @@ export function AppHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(() => {
+    try {
+      return typeof window !== "undefined" && sessionStorage.getItem("ai_mock_is_admin") === "true";
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     let active = true;
-    api("/admin/feedback/summary", { retries: 0 })
-      .then(() => {
-        if (active) setIsAdmin(true);
+    try {
+      const cached = sessionStorage.getItem("ai_mock_is_admin");
+      if (cached !== null) {
+        return;
+      }
+    } catch {
+      // Ignore storage errors
+    }
+
+    api<AdminMeOut>("/admin/me", { retries: 0 })
+      .then((data) => {
+        if (!active) return;
+        const admin = Boolean(data?.admin);
+        setIsAdmin(admin);
+        try {
+          sessionStorage.setItem("ai_mock_is_admin", admin ? "true" : "false");
+        } catch {}
       })
       .catch(() => {
-        // Not admin or unauthorized
+        if (!active) return;
+        setIsAdmin(false);
+        try {
+          sessionStorage.setItem("ai_mock_is_admin", "false");
+        } catch {}
       });
     return () => {
       active = false;
@@ -37,11 +62,14 @@ export function AppHeader() {
   }, []);
 
   const links = isAdmin
-    ? [...baseLinks, { href: "/admin/feedback", label: "Feedback" }]
+    ? [...baseLinks, { href: "/admin", label: "Admin" }]
     : baseLinks;
 
   async function signOut() {
     setSigningOut(true);
+    try {
+      sessionStorage.removeItem("ai_mock_is_admin");
+    } catch {}
     await getSupabaseBrowser().auth.signOut();
     router.replace("/login");
     router.refresh();
