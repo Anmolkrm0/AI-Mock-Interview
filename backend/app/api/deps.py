@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Annotated
@@ -58,18 +59,24 @@ CurrentUser = Annotated[AuthenticatedUser, Depends(current_user)]
 Providers = Annotated[ProviderRegistry, Depends(get_provider_registry)]
 Storage = Annotated[StorageClient, Depends(get_storage_client)]
 
+logger = logging.getLogger(__name__)
+
 
 def _is_email_verified(claims: dict[str, object]) -> bool:
     if claims.get("email_verified") is True or str(claims.get("email_verified", "")).lower() == "true":
         return True
+    if claims.get("email_confirmed_at") or claims.get("confirmed_at"):
+        return True
     user_metadata = claims.get("user_metadata")
-    return bool(
-        isinstance(user_metadata, dict)
-        and (
+    if isinstance(user_metadata, dict):
+        if (
             user_metadata.get("email_verified") is True
             or str(user_metadata.get("email_verified", "")).lower() == "true"
-        )
-    )
+        ):
+            return True
+        if user_metadata.get("email_confirmed_at") or user_metadata.get("confirmed_at"):
+            return True
+    return False
 
 
 async def require_admin(
@@ -82,10 +89,20 @@ async def require_admin(
         .lower()
     )
     if not email or email not in settings.admin_emails:
+        logger.warning(
+            "require_admin denied: email=%r not in admin_emails=%r",
+            email,
+            settings.admin_emails,
+        )
         raise NotFound()
 
     claims = user.claims if isinstance(user.claims, dict) else {}
     if not _is_email_verified(claims):
+        logger.warning(
+            "require_admin denied: email=%r is not verified (claims keys: %r)",
+            email,
+            list(claims.keys()),
+        )
         raise NotFound()
 
     return user
