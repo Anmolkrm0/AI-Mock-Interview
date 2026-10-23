@@ -33,7 +33,7 @@ export function AppHeader() {
     let active = true;
     try {
       const cached = sessionStorage.getItem("ai_mock_is_admin");
-      if (cached !== null) {
+      if (cached === "true") {
         return;
       }
     } catch {
