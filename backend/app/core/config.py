@@ -49,6 +49,9 @@ class Settings(BaseModel):
     recordings_bucket: str = "interview-recordings"
     documents_bucket: str = "interview-documents"
 
+    # Admin access
+    admin_emails: list[str] = Field(default_factory=list)
+
     # CORS
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
 
@@ -96,6 +99,15 @@ class Settings(BaseModel):
     worker_poll_seconds: float = 5.0
     job_lease_seconds: int = 300
     job_max_attempts: int = 3
+
+    @field_validator("admin_emails", mode="before")
+    @classmethod
+    def _split_admin_emails(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [v.strip().lower() for v in value.split(",") if v.strip()]
+        if isinstance(value, (list, tuple, set)):
+            return [str(v).strip().lower() for v in value if str(v).strip()]
+        return value
 
     @field_validator("cors_origins", mode="before")
     @classmethod

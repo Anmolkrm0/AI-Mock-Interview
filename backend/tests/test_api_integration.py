@@ -890,3 +890,137 @@ async def test_frontend_conductor_event_stream_is_accepted(client, fakes) -> Non
     assert any(
         u["reason"] == "skipped" and u["sequence_number"] == 2 for u in report["unevaluated_questions"]
     )
+
+
+# ------------------------------------------------------------------ admin feedback tests
+
+
+async def test_admin_feedback_access_control(client, monkeypatch) -> None:
+    admin_email = "admin@example.com"
+    monkeypatch.setattr(get_settings(), "admin_emails", [admin_email])
+
+    admin_user = uuid.uuid4()
+    regular_user = uuid.uuid4()
+
+    # 1. Unauthenticated -> 401
+    r = await client.get("/api/v1/admin/feedback")
+    assert r.status_code == 401
+    r = await client.get("/api/v1/admin/feedback/summary")
+    assert r.status_code == 401
+
+    # 2. Regular authenticated user (not in admin_emails) -> 404 (does NOT reveal admin routes exist)
+    reg_token = make_token(regular_user, email="user@example.com", email_verified=True)
+    r = await client.get("/api/v1/admin/feedback", headers={"Authorization": f"Bearer {reg_token}"})
+    assert r.status_code == 404
+    r = await client.get("/api/v1/admin/feedback/summary", headers={"Authorization": f"Bearer {reg_token}"})
+    assert r.status_code == 404
+
+    # 3. Email in admin_emails but unverified -> 404
+    unverified_token = make_token(admin_user, email=admin_email, email_verified=False)
+    r = await client.get("/api/v1/admin/feedback", headers={"Authorization": f"Bearer {unverified_token}"})
+    assert r.status_code == 404
+    r = await client.get(
+        "/api/v1/admin/feedback/summary", headers={"Authorization": f"Bearer {unverified_token}"}
+    )
+    assert r.status_code == 404
+
+    # 4. Verified admin (top-level claim) -> 200
+    verified_token = make_token(admin_user, email=admin_email, email_verified=True)
+    r = await client.get("/api/v1/admin/feedback", headers={"Authorization": f"Bearer {verified_token}"})
+    assert r.status_code == 200
+    r = await client.get(
+        "/api/v1/admin/feedback/summary", headers={"Authorization": f"Bearer {verified_token}"}
+    )
+    assert r.status_code == 200
+
+    # 5. Verified admin (user_metadata claim, case-insensitive email) -> 200
+    meta_token = make_token(admin_user, email="Admin@Example.COM", user_metadata={"email_verified": True})
+    r = await client.get("/api/v1/admin/feedback", headers={"Authorization": f"Bearer {meta_token}"})
+    assert r.status_code == 200
+
+
+async def test_admin_feedback_listing_filtering_and_summary(client, monkeypatch) -> None:
+    admin_email = "owner@example.com"
+    monkeypatch.setattr(get_settings(), "admin_emails", [admin_email])
+    admin_user = uuid.uuid4()
+    admin_headers = {
+        "Authorization": f"Bearer {make_token(admin_user, email=admin_email, email_verified=True)}"
+    }
+
+    user1 = uuid.uuid4()
+    user2 = uuid.uuid4()
+
+    iid1, _ = await ready_interview(client, user1, duration=20, rigor="standard")
+    iid2, _ = await ready_interview(client, user2, duration=30, rigor="target_bar")
+
+    # User 1 submits 5-star with comment
+    r1 = await client.post(
+        f"/api/v1/interviews/{iid1}/feedback",
+        headers=auth(user1),
+        json={"rating": 5, "comments": "Excellent experience"},
+    )
+    assert r1.status_code == 200
+
+    # User 2 submits 2-star without comment
+    r2 = await client.post(
+        f"/api/v1/interviews/{iid2}/feedback",
+        headers=auth(user2),
+        json={"rating": 2, "comments": ""},
+    )
+    assert r2.status_code == 200
+
+    # Admin lists feedback
+    list_res = await client.get("/api/v1/admin/feedback", headers=admin_headers)
+    assert list_res.status_code == 200
+    data = list_res.json()
+    assert data["total"] == 2
+    assert len(data["items"]) == 2
+    # Newest first
+    assert data["items"][0]["interview_id"] == str(iid2)
+    assert data["items"][0]["rating"] == 2
+    assert data["items"][0]["comments"] is None or data["items"][0]["comments"] == ""
+    assert data["items"][0]["duration_minutes"] == 30
+    assert data["items"][0]["evaluation_rigor"] == "target_bar"
+
+    assert data["items"][1]["interview_id"] == str(iid1)
+    assert data["items"][1]["rating"] == 5
+    assert data["items"][1]["comments"] == "Excellent experience"
+    assert data["items"][1]["duration_minutes"] == 20
+    assert data["items"][1]["evaluation_rigor"] == "standard"
+
+    # Filter by rating=5
+    r_filter = await client.get("/api/v1/admin/feedback?rating=5", headers=admin_headers)
+    assert r_filter.status_code == 200
+    assert r_filter.json()["total"] == 1
+    assert r_filter.json()["items"][0]["interview_id"] == str(iid1)
+
+    # Filter by rating=2
+    r_filter2 = await client.get("/api/v1/admin/feedback?rating=2", headers=admin_headers)
+    assert r_filter2.status_code == 200
+    assert r_filter2.json()["total"] == 1
+    assert r_filter2.json()["items"][0]["interview_id"] == str(iid2)
+
+    # Filter by has_comments=true
+    r_comments = await client.get("/api/v1/admin/feedback?has_comments=true", headers=admin_headers)
+    assert r_comments.status_code == 200
+    assert r_comments.json()["total"] == 1
+    assert r_comments.json()["items"][0]["interview_id"] == str(iid1)
+
+    # Filter by has_comments=false
+    r_no_comments = await client.get("/api/v1/admin/feedback?has_comments=false", headers=admin_headers)
+    assert r_no_comments.status_code == 200
+    assert r_no_comments.json()["total"] == 1
+    assert r_no_comments.json()["items"][0]["interview_id"] == str(iid2)
+
+    # Admin summary
+    summary_res = await client.get("/api/v1/admin/feedback/summary", headers=admin_headers)
+    assert summary_res.status_code == 200
+    s_data = summary_res.json()
+    assert s_data["total_responses"] == 2
+    assert s_data["average_rating"] == 3.5
+    assert s_data["last_7_days"] == 2
+    assert s_data["with_comments"] == 1
+    counts = s_data["rating_counts"]
+    assert counts.get("1", counts.get(1)) == 0
+    assert counts.get("2", counts.get(2)) == 1
+    assert counts.get("5", counts.get(5)) == 1

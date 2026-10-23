@@ -67,8 +67,12 @@ SUPABASE_URL=https://<ref>.supabase.co
 SUPABASE_SECRET_KEY=sb_secret_...
 SUPABASE_JWT_SECRET=            # only for legacy-secret projects
 CORS_ORIGINS=http://localhost:3000
+ADMIN_EMAILS=you@example.com    # comma-separated; access private /admin/feedback (must be email-verified)
 GEMINI_API_KEY=...
 ```
+
+Admin page: users whose email is listed in `ADMIN_EMAILS` (and email verified) can visit `/admin/feedback` to inspect all user ratings, comments, and interview details. For all other users, admin routes return 404.
+
 
 `frontend/.env.local`:
 

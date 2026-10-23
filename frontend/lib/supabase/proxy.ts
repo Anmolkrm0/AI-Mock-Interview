@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { env } from "@/lib/env";
 
-const PROTECTED = ["/dashboard", "/interview", "/settings"];
+const PROTECTED = ["/dashboard", "/interview", "/settings", "/admin"];
 const AUTH_PAGES = ["/login", "/signup"];
 
 /**

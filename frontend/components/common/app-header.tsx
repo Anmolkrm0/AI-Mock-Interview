@@ -3,14 +3,15 @@
 import { LogOut } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Wordmark } from "@/components/common/site-header-client";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
-const links = [
+const baseLinks = [
   { href: "/dashboard", label: "Interviews" },
   { href: "/settings", label: "Settings" },
 ];
@@ -19,6 +20,25 @@ export function AppHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    api("/admin/feedback/summary", { retries: 0 })
+      .then(() => {
+        if (active) setIsAdmin(true);
+      })
+      .catch(() => {
+        // Not admin or unauthorized
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const links = isAdmin
+    ? [...baseLinks, { href: "/admin/feedback", label: "Feedback" }]
+    : baseLinks;
 
   async function signOut() {
     setSigningOut(true);

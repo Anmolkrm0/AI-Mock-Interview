@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import documents, health, interviews, recordings, roles
+from app.api.v1 import admin, documents, health, interviews, recordings, roles
 from app.core.config import get_settings
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
@@ -84,6 +84,7 @@ def create_app() -> FastAPI:
     api.include_router(roles.router)
     api.include_router(interviews.router)
     api.include_router(recordings.router)
+    api.include_router(admin.router)
     app.include_router(api)
 
     @app.get("/", include_in_schema=False)

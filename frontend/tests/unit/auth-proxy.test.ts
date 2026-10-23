@@ -16,7 +16,7 @@ function req(path: string) {
 describe("route protection", () => {
   it("redirects signed-out users from protected pages to login with a return path", async () => {
     claims = null;
-    for (const path of ["/dashboard", "/interview/setup", "/interview/abc/live", "/settings"]) {
+    for (const path of ["/dashboard", "/interview/setup", "/interview/abc/live", "/settings", "/admin", "/admin/feedback"]) {
       const res = await updateSession(req(path));
       expect(res.status).toBe(307);
       const location = new URL(res.headers.get("location")!);

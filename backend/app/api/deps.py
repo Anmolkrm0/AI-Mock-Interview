@@ -10,7 +10,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
-from app.core.errors import Unauthorized
+from app.core.errors import NotFound, Unauthorized
 from app.core.rate_limit import rate_limiter
 from app.core.security import AuthenticatedUser, TokenVerifier
 from app.db.session import get_db
@@ -57,6 +57,41 @@ async def current_user(
 CurrentUser = Annotated[AuthenticatedUser, Depends(current_user)]
 Providers = Annotated[ProviderRegistry, Depends(get_provider_registry)]
 Storage = Annotated[StorageClient, Depends(get_storage_client)]
+
+
+def _is_email_verified(claims: dict[str, object]) -> bool:
+    if claims.get("email_verified") is True or str(claims.get("email_verified", "")).lower() == "true":
+        return True
+    user_metadata = claims.get("user_metadata")
+    return bool(
+        isinstance(user_metadata, dict)
+        and (
+            user_metadata.get("email_verified") is True
+            or str(user_metadata.get("email_verified", "")).lower() == "true"
+        )
+    )
+
+
+async def require_admin(
+    user: CurrentUser,
+    settings: SettingsDep,
+) -> AuthenticatedUser:
+    email = (
+        (user.email or (user.claims.get("email") if isinstance(user.claims, dict) else None) or "")
+        .strip()
+        .lower()
+    )
+    if not email or email not in settings.admin_emails:
+        raise NotFound()
+
+    claims = user.claims if isinstance(user.claims, dict) else {}
+    if not _is_email_verified(claims):
+        raise NotFound()
+
+    return user
+
+
+AdminUser = Annotated[AuthenticatedUser, Depends(require_admin)]
 
 
 def limit_ai(user: AuthenticatedUser, settings: Settings) -> None:

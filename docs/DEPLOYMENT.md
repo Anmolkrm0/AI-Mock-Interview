@@ -45,6 +45,7 @@ Fill in the values Render asks for:
 - `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (and `SUPABASE_JWT_SECRET` only for legacy-secret projects)
 - `GEMINI_API_KEY`
 - `CORS_ORIGINS` — `https://<frontend>.onrender.com` (exact, no trailing slash)
+- `ADMIN_EMAILS` — comma-separated admin emails allowed to view feedback at `/admin/feedback` (empty = no admins; email must be verified in Supabase)
 
 **Frontend**
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`

@@ -277,3 +277,29 @@ export interface RecordingOut {
   duration_seconds: number | null;
   created_at: string;
 }
+
+export interface FeedbackItemOut {
+  submitted_at: string;
+  user_email: string | null;
+  rating: number;
+  comments: string | null;
+  interview_id: string;
+  job_role: string;
+  duration_minutes: number;
+  evaluation_rigor: string;
+  overall_score: number | null;
+}
+
+export interface FeedbackListOut {
+  items: FeedbackItemOut[];
+  total: number;
+}
+
+export interface FeedbackSummaryOut {
+  total_responses: number;
+  average_rating: number;
+  rating_counts: Record<number | string, number>;
+  last_7_days: number;
+  with_comments: number;
+}
+
