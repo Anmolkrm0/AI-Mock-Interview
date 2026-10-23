@@ -1,0 +1,13 @@
+# Runtime dependencies. Versions below are the ones the test suite was run against.
+fastapi==0.161.1
+starlette>=1.7,<2
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
+sqlalchemy[asyncio]==2.1.6
+alembic==1.20.1
+psycopg[binary]==3.3.6
+httpx==0.28.1
+python-multipart==0.0.32
+PyJWT[crypto]==2.15.0
+PyMuPDF==1.28.2
+python-docx==1.2.0
