@@ -29,8 +29,25 @@ import { InterviewConductor, type Snapshot } from "@/lib/live/interview-conducto
 import { InterviewRecorder, pendingRecordings } from "@/lib/media/recorder";
 import { planRecording } from "@/lib/media/recording-budget";
 import { formatBytes } from "@/lib/utils";
-import { interviewsApi } from "@/services/interviews";
+import { interviewsApi, prefetchLiveToken } from "@/services/interviews";
 import type { InterviewDetail, LiveTokenOut } from "@/types/api";
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(errorMessage));
+    }, timeoutMs);
+    promise
+      .then((res) => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
 
 type MediaProblem = { title: string; message: string } | null;
 
@@ -166,10 +183,10 @@ const EMPTY_SNAPSHOT: Snapshot = {
 function InterviewRoom({ detail }: { detail: InterviewDetail }) {
   const router = useRouter();
 
-  // Pre-fetch live token as soon as interview detail is available
+  // Pre-fetch live token in background as soon as interview detail is available
   useEffect(() => {
     if (detail?.id) {
-      void interviewsApi.liveToken(detail.id);
+      prefetchLiveToken(detail.id);
     }
   }, [detail?.id]);
 
@@ -238,99 +255,133 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
   async function join(startClickedAt: number) {
     setJoining(true);
     setMediaProblem(null);
-    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      setMediaProblem({
-        title: "Microphone access is not supported",
-        message:
-          "Your browser does not support microphone access (getUserMedia). We recommend using Chrome on a laptop.",
-      });
-      setJoining(false);
-      return;
-    }
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx || !AudioCtx.prototype?.audioWorklet) {
-      setMediaProblem({
-        title: "Audio processing is not supported",
-        message:
-          "Your browser lacks AudioWorklet support required for real-time speech. We recommend using Chrome on a laptop.",
-      });
-      setJoining(false);
-      return;
-    }
+    let ctx: AudioContext | null = null;
+    let mic: MediaStream | null = null;
 
-    // Run mic permission, AudioContext + worklet loading, and token fetch in parallel
-    const micPromise = navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-    });
-    const audioPromise = (async () => {
-      const ctx = new AudioCtx();
-      await Promise.all([ctx.resume(), preloadAudioWorklet(ctx)]);
-      return ctx;
-    })();
-    const tokenPromise = interviewsApi.liveToken(detail.id);
-
-    let mic: MediaStream;
-    let ctx: AudioContext;
-    let token: LiveTokenOut;
     try {
-      [mic, ctx, token] = await Promise.all([micPromise, audioPromise, tokenPromise]);
-    } catch (e) {
-      setMediaProblem(describeMediaError(e, "microphone"));
-      setJoining(false);
-      return;
-    }
-
-    streamsRef.current = { mic, camera: null, ctx };
-
-    const engine = new InterviewConductor({ detail, ctx, mic, token, startClickedAt });
-    engine.recordPhase("mic permission granted");
-    engine.recordPhase("AudioContext/worklet ready");
-    engine.recordPhase("live token received");
-    engine.setHeadphones(headphones);
-    engine.onFinished = (reason) => void wrapUp(reason);
-    conductorRef.current = engine;
-    setConductor(engine);
-    setJoined(true);
-    setJoining(false);
-
-    // Connect and start interview immediately without blocking on camera or recorder
-    void engine.start();
-
-    // In background: handle camera if video mode is configured
-    if (detail.recording_mode === "video") {
-      navigator.mediaDevices
-        .getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 15, max: 24 } },
-        })
-        .then((camera) => {
-          streamsRef.current.camera = camera;
-          setCameraOn(true);
-          if (videoRef.current) videoRef.current.srcObject = camera;
-        })
-        .catch((e) => {
-          const p = describeMediaError(e, "camera");
-          toast.warning(`${p.title}. The interview continues; the recording will be audio only.`);
+      if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+        setMediaProblem({
+          title: "Microphone access is not supported",
+          message:
+            "Your browser does not support microphone access (getUserMedia). We recommend using Chrome on a laptop.",
         });
-    }
-
-    // In background: start media recorder once engine is up
-    const plan = recordingPlan;
-    if (plan.mode !== "none") {
-      const recorder = new InterviewRecorder(plan, env.recordingMaxBytes, setRecordingBytes, () => {
-        setRecordingStopped(true);
-        toast.warning(
-          "Recording stopped at the storage limit. The interview continues and everything up to now is kept.",
-        );
-      });
-      if (recorder.supported) {
-        recorder.start(ctx, mic, engine.player.recordTap.stream, streamsRef.current.camera);
-        recorderRef.current = recorder;
-        setRecordingActive(true);
-      } else {
-        toast.warning("This browser can't record. The interview continues without a recording.");
+        return;
       }
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) {
+        setMediaProblem({
+          title: "Audio processing is not supported",
+          message:
+            "Your browser lacks AudioContext support required for real-time speech. We recommend using Chrome on a laptop.",
+        });
+        return;
+      }
+
+      ctx = new AudioCtx();
+      if (!ctx.audioWorklet) {
+        setMediaProblem({
+          title: "Audio processing is not supported",
+          message:
+            "Your browser lacks AudioWorklet support required for real-time speech. We recommend using Chrome on a laptop.",
+        });
+        void ctx.close();
+        return;
+      }
+
+      // Run mic permission, AudioContext + worklet loading, and token fetch in parallel
+      const micPromise = navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+      });
+      const audioPromise = Promise.all([
+        ctx.resume(),
+        withTimeout(preloadAudioWorklet(ctx), 10_000, "AudioWorklet load timed out."),
+      ]).then(() => ctx);
+      const tokenPromise = withTimeout(
+        interviewsApi.liveToken(detail.id),
+        25_000,
+        "Token fetch timed out.",
+      );
+
+      let token: LiveTokenOut;
+      try {
+        [mic, , token] = await Promise.all([micPromise, audioPromise, tokenPromise]);
+      } catch (e) {
+        if (ctx) void ctx.close();
+        const isPermission =
+          e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError");
+        if (isPermission) {
+          setMediaProblem(describeMediaError(e, "microphone"));
+        } else {
+          setMediaProblem({
+            title: "Couldn't connect to the interviewer",
+            message: "Couldn't connect to the interviewer. Check your mic permission and try again.",
+          });
+        }
+        return;
+      }
+
+      streamsRef.current = { mic, camera: null, ctx };
+
+      const engine = new InterviewConductor({ detail, ctx, mic, token, startClickedAt });
+      engine.recordPhase("mic permission granted");
+      engine.recordPhase("AudioContext/worklet ready");
+      engine.recordPhase("live token received");
+      engine.setHeadphones(headphones);
+      engine.onFinished = (reason) => void wrapUp(reason);
+      conductorRef.current = engine;
+      setConductor(engine);
+      setJoined(true);
+
+      // Connect and start interview with 15s timeout
+      await withTimeout(engine.start(), 15_000, "Live session connect timed out.");
+
+      // In background: handle camera if video mode is configured
+      if (detail.recording_mode === "video") {
+        navigator.mediaDevices
+          .getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 15, max: 24 } },
+          })
+          .then((camera) => {
+            streamsRef.current.camera = camera;
+            setCameraOn(true);
+            if (videoRef.current) videoRef.current.srcObject = camera;
+          })
+          .catch((e) => {
+            const p = describeMediaError(e, "camera");
+            toast.warning(`${p.title}. The interview continues; the recording will be audio only.`);
+          });
+      }
+
+      // In background: start media recorder once engine is up
+      const plan = recordingPlan;
+      if (plan.mode !== "none") {
+        const recorder = new InterviewRecorder(plan, env.recordingMaxBytes, setRecordingBytes, () => {
+          setRecordingStopped(true);
+          toast.warning(
+            "Recording stopped at the storage limit. The interview continues and everything up to now is kept.",
+          );
+        });
+        if (recorder.supported) {
+          recorder.start(ctx, mic, engine.player.recordTap.stream, streamsRef.current.camera);
+          recorderRef.current = recorder;
+          setRecordingActive(true);
+        } else {
+          toast.warning("This browser can't record. The interview continues without a recording.");
+        }
+      }
+    } catch {
+      releaseMedia();
+      setJoined(false);
+      setConductor(null);
+      conductorRef.current = null;
+      setMediaProblem({
+        title: "Couldn't connect to the interviewer",
+        message: "Couldn't connect to the interviewer. Check your mic permission and try again.",
+      });
+    } finally {
+      setJoining(false);
     }
   }
 
@@ -405,7 +456,7 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
             </Notice>
           )}
           <Button size="lg" onClick={() => void join(performance.now())} loading={joining}>
-            {resumed ? "Rejoin interview" : "Join interview"}
+            {mediaProblem ? "Try again" : resumed ? "Rejoin interview" : "Join interview"}
           </Button>
           <p className="text-sm text-slate">
             Your browser will ask for microphone{detail.recording_mode === "video" ? " and camera" : ""} access.

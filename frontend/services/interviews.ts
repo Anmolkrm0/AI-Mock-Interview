@@ -64,8 +64,14 @@ interface CachedLiveToken {
 
 const liveTokenCache = new Map<string, CachedLiveToken>();
 
-export function prefetchLiveToken(id: string): Promise<LiveTokenOut> {
-  return interviewsApi.liveToken(id);
+export function prefetchLiveToken(id: string): void {
+  try {
+    interviewsApi.liveToken(id).catch(() => {
+      liveTokenCache.delete(id);
+    });
+  } catch {
+    /* ignore prefetch error */
+  }
 }
 
 export function clearLiveTokenCache(id?: string): void {
@@ -106,9 +112,9 @@ export const interviewsApi = {
             }
             return token;
           })
-          .catch((err) => {
+          .catch(() => {
             liveTokenCache.delete(id);
-            throw err;
+            return interviewsApi.liveToken(id, { forceFresh: true });
           });
       }
     }

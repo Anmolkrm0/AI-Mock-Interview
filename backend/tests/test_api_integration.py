@@ -1323,3 +1323,19 @@ async def test_live_token_endpoint_does_not_call_document_or_planner_services(
     assert token_data["token"].startswith("auth_tokens/")
     assert not doc_mock.called
     assert not planner_mock.called
+
+
+async def test_live_token_called_twice_in_a_row_returns_200(client, fakes) -> None:
+    registry, _ = fakes
+    user = uuid.uuid4()
+    iid, _ = await ready_interview(client, user)
+
+    # First call (e.g. prefetch)
+    r1 = await client.post(f"/api/v1/interviews/{iid}/live-token", headers=auth(user))
+    assert r1.status_code == 200, r1.text
+    assert r1.json()["token"].startswith("auth_tokens/")
+
+    # Second call (e.g. on click)
+    r2 = await client.post(f"/api/v1/interviews/{iid}/live-token", headers=auth(user))
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["token"].startswith("auth_tokens/")
