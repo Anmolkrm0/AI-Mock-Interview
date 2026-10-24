@@ -2,7 +2,6 @@ import { FileText, Mic, ScrollText, Shield } from "lucide-react";
 import Link from "next/link";
 
 import { SiteHeader } from "@/components/common/site-header";
-import { SampleQuestionPreview } from "@/components/landing/sample-question";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -104,10 +103,6 @@ export default function LandingPage() {
             </p>
           </div>
           <HeroTranscript />
-        </section>
-
-        <section className="border-t border-line bg-paper">
-          <SampleQuestionPreview />
         </section>
 
         <section aria-labelledby="how" className="border-y border-line bg-surface">
