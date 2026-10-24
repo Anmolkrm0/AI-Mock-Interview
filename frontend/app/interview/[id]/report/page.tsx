@@ -1,17 +1,19 @@
 "use client";
 
-import { AlertTriangle, ChevronDown } from "lucide-react";
+import { AlertTriangle, ChevronDown, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import { AppHeader } from "@/components/common/app-header";
 import { LoadError, WakingNotice } from "@/components/common/states";
 import { FeedbackForm } from "@/components/report/feedback-form";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/dialog";
 import { Notice, Skeleton } from "@/components/ui/feedback";
 import { useAsync } from "@/hooks/use-async";
-import { ApiError } from "@/lib/api";
+import { ApiError, errorMessage } from "@/lib/api";
 import { highlightQuotes } from "@/lib/highlight";
 import { cn, formatDate, RIGOR_LABELS } from "@/lib/utils";
 import { interviewsApi } from "@/services/interviews";
@@ -183,31 +185,29 @@ function QuestionCard({ q }: { q: QuestionEvaluation }) {
 
 function Recording({ interviewId }: { interviewId: string }) {
   const [state, setState] = useState<{ url: string; mime: string } | null>(null);
-  const [missing, setMissing] = useState(false);
-  const [loading, setLoading] = useState(false);
-  async function load() {
-    setLoading(true);
-    try {
-      const r = await interviewsApi.recordingUrl(interviewId);
-      setState({ url: r.url, mime: r.mime_type });
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 404) setMissing(true);
-    } finally {
-      setLoading(false);
-    }
-  }
-  if (missing)
-    return (
-      <p className="text-sm text-slate">
-        No recording is stored for this interview. Only your latest recording is kept.
-      </p>
-    );
-  if (!state)
-    return (
-      <Button variant="secondary" onClick={load} loading={loading}>
-        Play recording
-      </Button>
-    );
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    interviewsApi
+      .recordingUrl(interviewId)
+      .then((r) => {
+        if (active && r?.url) setState({ url: r.url, mime: r.mime_type });
+      })
+      .catch(() => {
+        // no recording or 404
+      })
+      .finally(() => {
+        if (active) setLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [interviewId]);
+
+  if (!loaded) return <Skeleton className="h-12 w-full" />;
+  if (!state) return <p className="text-sm text-slate">No recording for this interview.</p>;
+
   return state.mime.startsWith("video") ? (
     <video src={state.url} controls className="w-full rounded-md bg-ink" />
   ) : (
@@ -219,10 +219,24 @@ export default function ReportPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { data: report, error, loading, slow, reload } = useAsync<ReportOut>(() => interviewsApi.report(id), [id]);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (report && report.report_status !== "completed") router.replace(`/interview/${id}/processing`);
   }, [report, id, router]);
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await interviewsApi.delete(id);
+      toast.success("Interview deleted.");
+      router.push("/dashboard");
+    } catch (e) {
+      toast.error(errorMessage(e));
+      setDeleting(false);
+    }
+  }
 
   return (
     <>
@@ -323,7 +337,7 @@ export default function ReportPage() {
               <h2 className="text-2xl font-semibold">Answer by answer</h2>
               <p className="mt-2 text-slate">
                 Scored 1 to 5:{" "}
-                {Object.entries(report.rubric)
+                {Object.entries(report.rubric || {})
                   .map(([k, v]) => `${k} ${v.toLowerCase()}`)
                   .join("; ")}
                 .
@@ -364,13 +378,18 @@ export default function ReportPage() {
               </div>
             </section>
 
-            <div className="flex flex-wrap gap-3">
-              <Link href="/interview/setup" className={buttonVariants()}>
-                Practise again
-              </Link>
-              <Link href="/dashboard" className={buttonVariants({ variant: "secondary" })}>
-                All interviews
-              </Link>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-3">
+                <Link href="/interview/setup" className={buttonVariants()}>
+                  Practise again
+                </Link>
+                <Link href="/dashboard" className={buttonVariants({ variant: "secondary" })}>
+                  All interviews
+                </Link>
+              </div>
+              <Button variant="danger" onClick={() => setConfirmDelete(true)}>
+                <Trash2 /> Delete interview
+              </Button>
             </div>
           </div>
         )}
@@ -378,6 +397,16 @@ export default function ReportPage() {
           <Notice tone="info">The report is still being generated. Taking you to its progress page…</Notice>
         )}
       </main>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={handleDelete}
+        loading={deleting}
+        title="Delete this interview?"
+        description="This permanently deletes the transcript, report and any recording."
+        confirmLabel="Delete interview"
+      />
     </>
   );
 }

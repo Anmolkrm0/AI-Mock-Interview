@@ -3,20 +3,24 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Header, Query, Response
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.api.deps import DB, CurrentUser, Providers, SettingsDep, limit_ai
-from app.core.errors import NotFound
+from app.core.errors import Conflict, NotFound
 from app.models import (
     AnswerAttempt,
+    Document,
     EvaluationJob,
     Feedback,
     Interview,
+    InterviewEvent,
     InterviewPlan,
     Question,
     Recording,
+    RecordingUpload,
     Report,
+    StorageCleanupTask,
 )
 from app.schemas.interviews import (
     CompleteIn,
@@ -336,3 +340,98 @@ async def submit_feedback(
         )
     ).scalar_one()
     return FeedbackOut.model_validate(row)
+
+
+@router.delete("/{interview_id}", status_code=204)
+async def delete_interview(
+    interview_id: uuid.UUID,
+    user: CurrentUser,
+    db: DB,
+    settings: SettingsDep,
+) -> Response:
+    interview = await get_owned_interview(db, user.id, interview_id, for_update=True)
+    if interview.status in interview_service.LIVE_STATES:
+        raise Conflict(
+            "Cannot delete an interview while it is in progress.",
+            code="INTERVIEW_IN_PROGRESS",
+        )
+
+    # 1. Recording pointer
+    current_rec = (
+        await db.execute(select(Recording).where(Recording.interview_id == interview.id))
+    ).scalar_one_or_none()
+    if current_rec:
+        if current_rec.storage_path:
+            db.add(
+                StorageCleanupTask(
+                    bucket=settings.recordings_bucket,
+                    storage_path=current_rec.storage_path,
+                    reason="interview_deleted",
+                )
+            )
+        await db.delete(current_rec)
+
+    # 2. Recording uploads
+    uploads = list(
+        (
+            await db.execute(
+                select(RecordingUpload).where(RecordingUpload.interview_id == interview.id)
+            )
+        ).scalars()
+    )
+    for upload in uploads:
+        if upload.storage_path:
+            db.add(
+                StorageCleanupTask(
+                    bucket=settings.recordings_bucket,
+                    storage_path=upload.storage_path,
+                    reason="interview_deleted",
+                )
+            )
+        await db.delete(upload)
+
+    # 3. Documents
+    doc_ids = [d for d in (interview.resume_document_id, interview.job_description_document_id) if d is not None]
+    for doc_id in doc_ids:
+        doc = await db.get(Document, doc_id)
+        if doc:
+            other_cnt = (
+                await db.execute(
+                    select(func.count())
+                    .select_from(Interview)
+                    .where(
+                        Interview.id != interview.id,
+                        (Interview.resume_document_id == doc_id) | (Interview.job_description_document_id == doc_id),
+                    )
+                )
+            ).scalar_one()
+            if other_cnt == 0:
+                if doc.storage_path:
+                    db.add(
+                        StorageCleanupTask(
+                            bucket=settings.documents_bucket,
+                            storage_path=doc.storage_path,
+                            reason="interview_deleted",
+                        )
+                    )
+                await db.delete(doc)
+
+    # 4. Explicitly delete child rows in transaction
+    await db.execute(delete(EvaluationJob).where(EvaluationJob.interview_id == interview.id))
+    await db.execute(delete(Feedback).where(Feedback.interview_id == interview.id))
+
+    await db.execute(delete(Report).where(Report.interview_id == interview.id))
+
+    await db.execute(delete(InterviewEvent).where(InterviewEvent.interview_id == interview.id))
+
+    questions = list((await db.execute(select(Question).where(Question.interview_id == interview.id))).scalars())
+    for q in questions:
+        await db.execute(delete(AnswerAttempt).where(AnswerAttempt.question_id == q.id))
+        await db.delete(q)
+
+    await db.execute(delete(InterviewPlan).where(InterviewPlan.interview_id == interview.id))
+
+    await db.delete(interview)
+    await db.commit()
+    return Response(status_code=204)
+

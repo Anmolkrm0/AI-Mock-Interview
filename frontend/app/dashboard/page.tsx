@@ -1,13 +1,14 @@
 "use client";
 
-import { Disc3, Plus } from "lucide-react";
+import { Disc3, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { toast } from "sonner";
 
 import { LoadError, WakingNotice } from "@/components/common/states";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/dialog";
 import { Badge, Skeleton } from "@/components/ui/feedback";
 import { useAsync } from "@/hooks/use-async";
 import { errorMessage } from "@/lib/api";
@@ -107,6 +108,8 @@ function ScoreCell({ item, onRetry }: { item: InterviewSummary; onRetry?: () => 
 export default function DashboardPage() {
   const [name, setName] = useState<string | null>(null);
   const { data, error, loading, slow, reload } = useAsync(() => interviewsApi.list(0, 50));
+  const [deleteTarget, setDeleteTarget] = useState<InterviewSummary | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     getSupabaseBrowser()
@@ -117,6 +120,21 @@ export default function DashboardPage() {
       })
       .catch(() => setName(null));
   }, []);
+
+  async function handleDeleteInterview() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await interviewsApi.delete(deleteTarget.id);
+      toast.success("Interview deleted.");
+      setDeleteTarget(null);
+      reload();
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const items = data?.items ?? [];
   const completed = items.filter((i) => i.overall_score !== null);
@@ -208,9 +226,21 @@ export default function DashboardPage() {
                         <ScoreCell item={item} onRetry={reload} />
                       </td>
                       <td className="px-5 py-4 text-right">
-                        <Link href={link.href} className={buttonVariants({ variant: "secondary", size: "sm" })}>
-                          {link.label}
-                        </Link>
+                        <div className="flex items-center justify-end gap-2">
+                          <Link href={link.href} className={buttonVariants({ variant: "secondary", size: "sm" })}>
+                            {link.label}
+                          </Link>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDeleteTarget(item)}
+                            className="text-slate hover:text-signal"
+                            aria-label={`Delete interview for ${item.job_role}`}
+                            title="Delete interview"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -220,6 +250,16 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteInterview}
+        loading={deleting}
+        title="Delete this interview?"
+        description="This permanently deletes the transcript, report and any recording."
+        confirmLabel="Delete interview"
+      />
     </main>
   );
 }

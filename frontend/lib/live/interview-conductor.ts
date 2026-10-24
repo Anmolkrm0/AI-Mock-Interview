@@ -66,9 +66,10 @@ const MAX_RECONNECTS = 6;
 export interface ConductorDeps {
   detail: InterviewDetail;
   ctx: AudioContext;
-  mic: MediaStream;
+  mic?: MediaStream | null;
   token?: LiveTokenOut | Promise<LiveTokenOut>;
   startClickedAt?: number;
+  initialInputMode?: "voice" | "text";
 }
 
 export class InterviewConductor {
@@ -133,7 +134,7 @@ export class InterviewConductor {
       interviewerSpeaking: false,
       hasGreetingStarted: this.isResumedInterview,
       micLevel: 0,
-      inputMode: "voice",
+      inputMode: deps.initialInputMode ?? (deps.mic ? "voice" : "text"),
       headphones: false,
       deadlineMs: detail.deadline_at ? Date.parse(detail.deadline_at) - offset : null,
       clockOffsetMs: offset,
@@ -260,22 +261,24 @@ export class InterviewConductor {
     this.update({ phase: "connecting", notice: "Connecting to your interviewer…", error: null });
     // Flush left-over events from prior page loads in background without blocking connect
     void this.queue.flush();
-    try {
-      this.capture = new MicCapture(
-        this.deps.ctx,
-        this.deps.mic,
-        (pcm) => this.sendAudio(pcm),
-        (level) => this.update({ micLevel: level }),
-      );
-      await this.capture.start();
-      this.recordPhase("AudioContext/worklet ready");
-    } catch {
-      this.fail({
-        title: "The microphone couldn't start",
-        message: "Reload the page and allow microphone access when asked.",
-        retryable: true,
-      });
-      return;
+    if (this.deps.mic) {
+      try {
+        this.capture = new MicCapture(
+          this.deps.ctx,
+          this.deps.mic,
+          (pcm) => this.sendAudio(pcm),
+          (level) => this.update({ micLevel: level }),
+        );
+        await this.capture.start();
+        this.recordPhase("AudioContext/worklet ready");
+      } catch {
+        this.fail({
+          title: "The microphone couldn't start",
+          message: "Reload the page and allow microphone access when asked.",
+          retryable: true,
+        });
+        return;
+      }
     }
     await this.connect(false);
   }
@@ -643,6 +646,7 @@ export class InterviewConductor {
   }
 
   setInputMode(mode: "voice" | "text") {
+    if (!this.deps.mic && mode === "voice") return;
     if (mode === this.snapshot.inputMode) return;
     this.update({ inputMode: mode });
     if (this.capture) this.capture.muted = mode === "text";

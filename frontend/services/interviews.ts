@@ -150,6 +150,9 @@ export const interviewsApi = {
   recordingUrl(id: string) {
     return api<{ url: string; expires_in_seconds: number; mime_type: string }>(`/interviews/${id}/recording-url`);
   },
+  delete(id: string) {
+    return api<void>(`/interviews/${id}`, { method: "DELETE" });
+  },
 };
 
 export const recordingsApi = {
@@ -164,5 +167,11 @@ export const recordingsApi = {
   },
   deleteLatest() {
     return api<void>("/recordings/latest", { method: "DELETE" });
+  },
+};
+
+export const usersApi = {
+  deleteAccount() {
+    return api<void>("/users/me", { method: "DELETE" });
   },
 };

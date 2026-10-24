@@ -201,6 +201,8 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
   const [joined, setJoined] = useState(false);
   const [joining, setJoining] = useState(false);
   const [mediaProblem, setMediaProblem] = useState<MediaProblem>(null);
+  const [micUnavailable, setMicUnavailable] = useState(false);
+  const [typedFallbackActive, setTypedFallbackActive] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [headphones, setHeadphones] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -255,16 +257,13 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
   async function join(startClickedAt: number) {
     setJoining(true);
     setMediaProblem(null);
+    setMicUnavailable(false);
     let ctx: AudioContext | null = null;
     let mic: MediaStream | null = null;
 
     try {
       if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-        setMediaProblem({
-          title: "Microphone access is not supported",
-          message:
-            "Your browser does not support microphone access (getUserMedia). We recommend using Chrome on a laptop.",
-        });
+        setMicUnavailable(true);
         return;
       }
       const AudioCtx =
@@ -291,13 +290,21 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
       }
 
       // Run mic permission, AudioContext + worklet loading, and token fetch in parallel
-      const micPromise = navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-      });
+      let micError: unknown = null;
+      const micPromise = navigator.mediaDevices
+        .getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+        })
+        .catch((err) => {
+          micError = err;
+          return null;
+        });
+
       const audioPromise = Promise.all([
         ctx.resume(),
         withTimeout(preloadAudioWorklet(ctx), 10_000, "AudioWorklet load timed out."),
       ]).then(() => ctx);
+
       const tokenPromise = withTimeout(
         interviewsApi.liveToken(detail.id),
         25_000,
@@ -307,18 +314,22 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
       let token: LiveTokenOut;
       try {
         [mic, , token] = await Promise.all([micPromise, audioPromise, tokenPromise]);
-      } catch (e) {
+      } catch {
         if (ctx) void ctx.close();
-        const isPermission =
-          e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError");
-        if (isPermission) {
-          setMediaProblem(describeMediaError(e, "microphone"));
-        } else {
-          setMediaProblem({
-            title: "Couldn't connect to the interviewer",
-            message: "Couldn't connect to the interviewer. Check your mic permission and try again.",
-          });
+        if (micError) {
+          setMicUnavailable(true);
+          return;
         }
+        setMediaProblem({
+          title: "Couldn't connect to the interviewer",
+          message: "Couldn't connect to the interviewer. Check your mic permission and try again.",
+        });
+        return;
+      }
+
+      if (micError || !mic) {
+        if (ctx) void ctx.close();
+        setMicUnavailable(true);
         return;
       }
 
@@ -379,6 +390,71 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
       setMediaProblem({
         title: "Couldn't connect to the interviewer",
         message: "Couldn't connect to the interviewer. Check your mic permission and try again.",
+      });
+    } finally {
+      setJoining(false);
+    }
+  }
+
+  async function joinTyped(startClickedAt: number) {
+    setJoining(true);
+    setMediaProblem(null);
+    let ctx: AudioContext | null = null;
+
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtx) {
+        ctx = new AudioCtx();
+        if (ctx.audioWorklet) {
+          await Promise.all([
+            ctx.resume(),
+            withTimeout(preloadAudioWorklet(ctx), 10_000, "AudioWorklet load timed out."),
+          ]).catch(() => undefined);
+        }
+      }
+
+      const token = await withTimeout(
+        interviewsApi.liveToken(detail.id),
+        25_000,
+        "Token fetch timed out.",
+      );
+
+      streamsRef.current = { mic: null, camera: null, ctx };
+      setTypedFallbackActive(true);
+
+      const engine = new InterviewConductor({
+        detail,
+        ctx: ctx || new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)(),
+        mic: null,
+        token,
+        startClickedAt,
+        initialInputMode: "text",
+      });
+      engine.recordPhase("AudioContext/worklet ready");
+      engine.recordPhase("live token received");
+      engine.setHeadphones(headphones);
+      engine.onFinished = (reason) => void wrapUp(reason);
+      conductorRef.current = engine;
+      setConductor(engine);
+      setJoined(true);
+
+      // Connect and start interview with 15s timeout
+      await withTimeout(engine.start(), 15_000, "Live session connect timed out.");
+
+      toast.info("Microphone unavailable. Recording is skipped; you can answer by typing.", {
+        duration: 6000,
+      });
+    } catch (e) {
+      releaseMedia();
+      setJoined(false);
+      setConductor(null);
+      conductorRef.current = null;
+      setTypedFallbackActive(false);
+      setMediaProblem({
+        title: "Couldn't connect to the interviewer",
+        message: e instanceof Error ? e.message : "Couldn't connect to the interviewer. Please try again.",
       });
     } finally {
       setJoining(false);
@@ -450,14 +526,32 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
               </span>
             </span>
           </label>
-          {mediaProblem && (
-            <Notice tone="error" title={mediaProblem.title}>
-              {mediaProblem.message}
-            </Notice>
+          {micUnavailable ? (
+            <div className="space-y-4">
+              <Notice tone="warning" title="We couldn't use your microphone">
+                We couldn&apos;t use your microphone. You can still do the interview by typing your answers.
+              </Notice>
+              <div className="flex flex-wrap gap-3">
+                <Button size="lg" onClick={() => void joinTyped(performance.now())} loading={joining}>
+                  Continue with typing
+                </Button>
+                <Button size="lg" variant="secondary" onClick={() => void join(performance.now())} disabled={joining}>
+                  Try microphone again
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {mediaProblem && (
+                <Notice tone="error" title={mediaProblem.title}>
+                  {mediaProblem.message}
+                </Notice>
+              )}
+              <Button size="lg" onClick={() => void join(performance.now())} loading={joining}>
+                {mediaProblem ? "Try again" : resumed ? "Rejoin interview" : "Join interview"}
+              </Button>
+            </>
           )}
-          <Button size="lg" onClick={() => void join(performance.now())} loading={joining}>
-            {mediaProblem ? "Try again" : resumed ? "Rejoin interview" : "Join interview"}
-          </Button>
           <p className="text-sm text-slate">
             Your browser will ask for microphone{detail.recording_mode === "video" ? " and camera" : ""} access.
           </p>
@@ -517,6 +611,11 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
             </Notice>
           )}
           {snap.notice && !snap.error && <Notice tone="info">{snap.notice}</Notice>}
+          {typedFallbackActive && !snap.error && (
+            <Notice tone="info">
+              Microphone unavailable: recording is skipped. You can type your answers and your transcript is saved.
+            </Notice>
+          )}
 
           <div className="rounded-lg border border-line bg-surface p-6 sm:p-8">
             <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
@@ -543,7 +642,13 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
               inputMode={snap.inputMode}
               canSkip={canSkip}
               canRetake={canRetake}
-              onToggleText={() => conductor?.setInputMode(snap.inputMode === "text" ? "voice" : "text")}
+              onToggleText={() => {
+                if (!streamsRef.current.mic && snap.inputMode === "text") {
+                  toast.warning("Microphone is unavailable for this session. Please type your answers.");
+                  return;
+                }
+                conductor?.setInputMode(snap.inputMode === "text" ? "voice" : "text");
+              }}
               onSkip={() => conductor?.skipCurrent()}
               onRetake={() => conductor?.retakeCurrent()}
             />

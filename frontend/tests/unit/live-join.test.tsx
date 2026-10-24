@@ -219,4 +219,46 @@ describe("LivePage Join Flow", () => {
       expect(live.sessions.length).toBeGreaterThan(0);
     });
   });
+
+  it("When mic is denied or unavailable, shows fallback notice with Continue with typing and Try microphone again", async () => {
+    // Mock getUserMedia failure
+    const originalGetUserMedia = navigator.mediaDevices?.getUserMedia;
+    if (navigator.mediaDevices) {
+      navigator.mediaDevices.getUserMedia = vi.fn().mockRejectedValue(new DOMException("Permission denied", "NotAllowedError"));
+    }
+
+    try {
+      render(<LivePage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /join interview/i })).toBeInTheDocument();
+      });
+
+      const joinBtn = screen.getByRole("button", { name: /join interview/i });
+      await userEvent.click(joinBtn);
+
+      // Verify notice and both buttons appear
+      await waitFor(() => {
+        expect(
+          screen.getByText("We couldn't use your microphone. You can still do the interview by typing your answers.")
+        ).toBeInTheDocument();
+      });
+
+      expect(screen.getByRole("button", { name: /continue with typing/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /try microphone again/i })).toBeInTheDocument();
+
+      // Click "Continue with typing"
+      const typeBtn = screen.getByRole("button", { name: /continue with typing/i });
+      await userEvent.click(typeBtn);
+
+      // Successfully connects in typed mode
+      await waitFor(() => {
+        expect(live.sessions.length).toBeGreaterThan(0);
+      });
+    } finally {
+      if (navigator.mediaDevices && originalGetUserMedia) {
+        navigator.mediaDevices.getUserMedia = originalGetUserMedia;
+      }
+    }
+  });
 });

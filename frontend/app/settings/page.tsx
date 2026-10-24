@@ -2,6 +2,7 @@
 
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -12,7 +13,7 @@ import { Skeleton } from "@/components/ui/feedback";
 import { ApiError, errorMessage } from "@/lib/api";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { formatBytes, formatDate, formatDuration } from "@/lib/utils";
-import { interviewsApi, recordingsApi } from "@/services/interviews";
+import { interviewsApi, recordingsApi, usersApi } from "@/services/interviews";
 import type { RecordingOut } from "@/types/api";
 
 export default function SettingsPage() {
@@ -23,7 +24,10 @@ export default function SettingsPage() {
   const [error, setError] = useState<Error | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [playUrl, setPlayUrl] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     const slowTimer = setTimeout(() => setSlow(true), 4000);
@@ -71,6 +75,19 @@ export default function SettingsPage() {
     }
   }
 
+  async function removeAccount() {
+    setDeletingAccount(true);
+    try {
+      await usersApi.deleteAccount();
+      await getSupabaseBrowser().auth.signOut();
+      toast.success("Your account and all associated data have been permanently deleted.");
+      router.push("/");
+    } catch (e) {
+      toast.error(errorMessage(e));
+      setDeletingAccount(false);
+    }
+  }
+
   return (
     <main id="main" className="mx-auto max-w-3xl px-5 py-10 sm:px-8">
       <h1 className="text-4xl font-semibold">Settings</h1>
@@ -80,6 +97,11 @@ export default function SettingsPage() {
           Account
         </h2>
         <p className="mt-2 text-slate">Signed in as {email ?? "…"}</p>
+        <div className="mt-4">
+          <Button variant="danger" size="sm" onClick={() => setConfirmDeleteAccount(true)}>
+            <Trash2 /> Delete account
+          </Button>
+        </div>
       </section>
 
       <section aria-labelledby="rec" className="mt-10 border-t border-line pt-8">
@@ -146,6 +168,16 @@ export default function SettingsPage() {
         title="Delete your recording?"
         description="The recording file is permanently deleted. Your interview report and transcript stay available."
         confirmLabel="Delete recording"
+      />
+
+      <ConfirmDialog
+        open={confirmDeleteAccount}
+        onClose={() => setConfirmDeleteAccount(false)}
+        onConfirm={removeAccount}
+        loading={deletingAccount}
+        title="Delete your account?"
+        description="This permanently deletes your account, all interviews, transcripts, reports, documents, and recordings. This cannot be undone."
+        confirmLabel="Delete account"
       />
     </main>
   );

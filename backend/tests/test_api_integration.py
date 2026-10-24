@@ -1339,3 +1339,67 @@ async def test_live_token_called_twice_in_a_row_returns_200(client, fakes) -> No
     r2 = await client.post(f"/api/v1/interviews/{iid}/live-token", headers=auth(user))
     assert r2.status_code == 200, r2.text
     assert r2.json()["token"].startswith("auth_tokens/")
+
+
+async def test_delete_interview(client) -> None:
+    owner, other = uuid.uuid4(), uuid.uuid4()
+    iid, _ = await ready_interview(client, owner)
+
+    # 1. Non-owner gets 404
+    r = await client.delete(f"/api/v1/interviews/{iid}", headers=auth(other))
+    assert r.status_code == 404
+
+    # 2. Refuse deletion while live (409)
+    async with get_sessionmaker()() as db:
+        inv = await db.get(Interview, uuid.UUID(iid))
+        assert inv is not None
+        inv.status = "in_progress"
+        await db.commit()
+
+    r = await client.delete(f"/api/v1/interviews/{iid}", headers=auth(owner))
+    assert r.status_code == 409
+    assert "Cannot delete an interview while it is in progress." in r.json()["error"]["message"]
+
+    # 3. Owner can delete when completed or ready
+    async with get_sessionmaker()() as db:
+        inv = await db.get(Interview, uuid.UUID(iid))
+        assert inv is not None
+        inv.status = "completed"
+        await db.commit()
+
+    r = await client.delete(f"/api/v1/interviews/{iid}", headers=auth(owner))
+    assert r.status_code == 204
+
+    # Verify interview is gone
+    r = await client.get(f"/api/v1/interviews/{iid}", headers=auth(owner))
+    assert r.status_code == 404
+
+
+async def test_delete_account(client) -> None:
+    user = uuid.uuid4()
+    iid, _ = await ready_interview(client, user)
+
+    # 1. Refuse if an interview is live
+    async with get_sessionmaker()() as db:
+        inv = await db.get(Interview, uuid.UUID(iid))
+        assert inv is not None
+        inv.status = "connecting"
+        await db.commit()
+
+    r = await client.delete("/api/v1/users/me", headers=auth(user))
+    assert r.status_code == 409
+
+    # 2. Succeeds when not live
+    async with get_sessionmaker()() as db:
+        inv = await db.get(Interview, uuid.UUID(iid))
+        assert inv is not None
+        inv.status = "completed"
+        await db.commit()
+
+    r = await client.delete("/api/v1/users/me", headers=auth(user))
+    assert r.status_code == 204
+
+    # 3. Verify interview and profile are deleted
+    r = await client.get(f"/api/v1/interviews/{iid}", headers=auth(user))
+    assert r.status_code == 404
+
