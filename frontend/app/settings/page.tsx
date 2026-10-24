@@ -110,7 +110,7 @@ export default function SettingsPage() {
         </h2>
         <p className="mt-2 text-slate">
           We keep only your most recent recording. When you record a new interview, the previous recording is replaced.
-          Reports and transcripts are always kept.
+          Reports and transcripts are kept until you delete them.
         </p>
         <div className="mt-5">
           {slow && loading && (
@@ -166,7 +166,7 @@ export default function SettingsPage() {
         onConfirm={remove}
         loading={deleting}
         title="Delete your recording?"
-        description="The recording file is permanently deleted. Your interview report and transcript stay available."
+        description="The recording file is permanently deleted. Your interview report and transcript stay available until deleted."
         confirmLabel="Delete recording"
       />
 

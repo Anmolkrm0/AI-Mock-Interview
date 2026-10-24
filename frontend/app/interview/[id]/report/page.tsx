@@ -342,6 +342,12 @@ export default function ReportPage() {
                   .join("; ")}
                 .
               </p>
+              <p className="mt-2 text-sm text-slate">
+                <span className="font-medium text-ink">How follow-up answers affect your score:</span> The assessor
+                evaluates your full exchange for each question, including follow-up answers. If your initial answer
+                missed expected evidence, clarifying details or adding concrete examples during a follow-up directly
+                improves your competency score.
+              </p>
               <div className="mt-6 space-y-4">
                 {report.question_evaluations.map((q) => (
                   <QuestionCard key={q.question_id} q={q} />

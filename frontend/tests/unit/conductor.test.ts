@@ -303,5 +303,58 @@ describe("InterviewConductor", () => {
     await c.start();
     expect(c.getSnapshot().phase).toBe("live");
   });
+
+  it("deduplicates identical and partial transcript lines", async () => {
+    const c = new InterviewConductor({
+      detail: detail(),
+      ctx: {} as AudioContext,
+      mic: null,
+      token: {
+        provider: "fake",
+        token: "auth_tokens/fake",
+        model: "fake",
+        api_version: "v1alpha",
+        expires_at: new Date(Date.now() + 1800e3).toISOString(),
+        new_session_expires_at: new Date(Date.now() + 60e3).toISOString(),
+        connect_config: {},
+        deadline_at: null,
+        server_time: new Date().toISOString(),
+      },
+      startClickedAt: performance.now(),
+    });
+
+    await c.start();
+    const s = live.sessions[0]!;
+    expect(s).toBeDefined();
+
+    // Advance to question 1
+    s.emit({
+      toolCall: { functionCalls: [{ id: "call-1", name: "advance_to_question", args: { next_question_number: 1 } }] },
+    });
+    await tick();
+
+    // Interviewer speaks question
+    s.emit({
+      serverContent: {
+        outputTranscription: { text: "Can you describe a challenging bug?" },
+        turnComplete: true,
+      },
+    });
+    await tick();
+
+    // Model repeats the same question
+    s.emit({
+      serverContent: {
+        outputTranscription: { text: "Can you describe a challenging bug?" },
+        turnComplete: true,
+      },
+    });
+    await tick();
+
+    const transcript = c.getSnapshot().transcript;
+    const interviewerLines = transcript.filter((t) => t.speaker === "interviewer");
+    expect(interviewerLines[0]?.text).toBe("Can you describe a challenging bug?");
+  });
 });
+
 

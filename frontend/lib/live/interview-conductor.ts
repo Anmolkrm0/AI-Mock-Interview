@@ -213,6 +213,42 @@ export class InterviewConductor {
     const clean = text.replace(/\s+/g, " ").trim();
     if (!clean) return;
     const questionId = this.buffer?.questionId;
+
+    // Deduplicate identical consecutive lines or flush extensions
+    const last = this.snapshot.transcript[this.snapshot.transcript.length - 1];
+    if (last && last.speaker === speaker) {
+      const normLast = last.text.trim().toLowerCase();
+      const normClean = clean.toLowerCase();
+      if (normLast === normClean) {
+        return;
+      }
+      if (normClean.startsWith(normLast) && normLast.length >= 10) {
+        const updated = [...this.snapshot.transcript];
+        updated[updated.length - 1] = { speaker, text: clean, question_id: questionId ?? last.question_id };
+        this.update({ transcript: updated });
+        if (this.buffer && this.buffer.exchange.length > 0) {
+          this.buffer.exchange[this.buffer.exchange.length - 1] = { speaker, text: clean.slice(0, 8000) };
+          if (speaker === "candidate" && this.buffer.candidateText.length > 0) {
+            this.buffer.candidateText[this.buffer.candidateText.length - 1] = clean;
+          }
+        }
+        return;
+      }
+    }
+
+    // Prevent interviewer from repeating identical question text within the active question
+    if (speaker === "interviewer" && questionId) {
+      const existingInQuestion = this.snapshot.transcript.some(
+        (t) =>
+          t.speaker === "interviewer" &&
+          t.question_id === questionId &&
+          t.text.trim().toLowerCase() === clean.toLowerCase(),
+      );
+      if (existingInQuestion) {
+        return;
+      }
+    }
+
     this.update({ transcript: [...this.snapshot.transcript, { speaker, text: clean, question_id: questionId }] });
     this.emit({ event_type: "transcript_segment", speaker, text: clean.slice(0, 8000), question_id: questionId });
     if (this.buffer) {

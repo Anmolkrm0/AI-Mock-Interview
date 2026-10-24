@@ -31,7 +31,8 @@ vi.mock("@/lib/supabase/client", () => ({
 
 import { PhoneNotice } from "@/components/common/phone-notice";
 import { ChoiceGroup } from "@/components/interview/choice-group";
-import { Controls, Countdown, InterviewerPresence, TypedAnswer } from "@/components/interview/live-parts";
+import { Controls, Countdown, InterviewerPresence, QuestionPanel, TypedAnswer } from "@/components/interview/live-parts";
+import { SampleQuestionPreview } from "@/components/landing/sample-question";
 import { FeedbackForm } from "@/components/report/feedback-form";
 
 describe("ChoiceGroup (duration and rigor)", () => {
@@ -327,3 +328,59 @@ describe("setup page", () => {
     expect(screen.getByLabelText(/audio only/i)).toBeChecked();
   });
 });
+
+describe("QuestionPanel", () => {
+  it("renders 'Bonus question' when question priority is optional", () => {
+    const questions = [
+      {
+        id: "q1",
+        sequence_number: 1,
+        question_text: "Core question 1",
+        competency: "Coding",
+        difficulty: 3,
+        question_type: "technical",
+        priority: "core" as const,
+        time_allocation_seconds: 120,
+        status: "answered" as const,
+      },
+      {
+        id: "q2",
+        sequence_number: 2,
+        question_text: "Optional bonus question",
+        competency: "Architecture",
+        difficulty: 4,
+        question_type: "technical",
+        priority: "optional" as const,
+        time_allocation_seconds: 120,
+        status: "pending" as const,
+      },
+    ];
+
+    render(<QuestionPanel questions={questions} currentIndex={1} />);
+    expect(screen.getByText("Bonus question")).toBeInTheDocument();
+    expect(screen.queryByText(/Question 2 of 1/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("SampleQuestionPreview", () => {
+  it("loads a sample answer and evaluates it against the rubric", async () => {
+    render(<SampleQuestionPreview />);
+
+    expect(screen.getByText("Test one question right now")).toBeInTheDocument();
+    expect(screen.getByText("Ready to evaluate")).toBeInTheDocument();
+
+    // Click "Strong response"
+    const strongBtn = screen.getByRole("button", { name: "Strong response" });
+    await userEvent.click(strongBtn);
+
+    // Evaluate
+    const evalBtn = screen.getByRole("button", { name: /evaluate answer/i });
+    await userEvent.click(evalBtn);
+
+    // Should see score, verified evidence and why this score
+    expect(screen.getByText("Word-for-word verified")).toBeInTheDocument();
+    expect(screen.getByText("4")).toBeInTheDocument();
+    expect(screen.getByText("Strong and well-supported")).toBeInTheDocument();
+  });
+});
+

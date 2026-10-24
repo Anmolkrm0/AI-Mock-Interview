@@ -111,7 +111,9 @@ export function QuestionPanel({ questions, currentIndex }: { questions: Question
       <div className="flex items-center justify-between gap-4 text-sm text-slate">
         <span>
           {current
-            ? `Question ${current.sequence_number} of ${core}${current.priority === "optional" ? " (bonus)" : ""}`
+            ? current.priority === "optional"
+              ? "Bonus question"
+              : `Question ${current.sequence_number} of ${core}`
             : "Between questions"}
         </span>
         <span>{done} done</span>
@@ -145,9 +147,19 @@ export function Transcript({
     const nearBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 120;
     if (nearBottom) endRef.current?.scrollIntoView({ block: "end" });
   }, [lines.length, partial?.text]);
+
+  const lastLine = lines[lines.length - 1];
+  const isDuplicatePartial = Boolean(
+    partial &&
+      lastLine &&
+      lastLine.speaker === partial.speaker &&
+      lastLine.text.trim().toLowerCase() === partial.text.trim().toLowerCase(),
+  );
+  const showPartial = partial && !isDuplicatePartial;
+
   return (
     <div ref={containerRef} className="h-full overflow-y-auto pr-1" aria-label="Live transcript" tabIndex={0}>
-      {lines.length === 0 && !partial && <p className="text-sm text-slate">The transcript appears here as you talk.</p>}
+      {lines.length === 0 && !showPartial && <p className="text-sm text-slate">The transcript appears here as you talk.</p>}
       <ol className="space-y-4">
         {lines.map((l, i) => (
           <li key={i} className={cn(l.speaker === "candidate" && "pl-4 border-l-2 border-line-strong")}>
@@ -155,7 +167,7 @@ export function Transcript({
             <p className="text-[15px] leading-relaxed">{l.text}</p>
           </li>
         ))}
-        {partial && (
+        {showPartial && (
           <li className={cn("opacity-70", partial.speaker === "candidate" && "pl-4 border-l-2 border-line-strong")}>
             <p className="text-xs font-medium text-slate">{partial.speaker === "candidate" ? "You" : "Interviewer"}</p>
             <p className="text-[15px] leading-relaxed">{partial.text}</p>

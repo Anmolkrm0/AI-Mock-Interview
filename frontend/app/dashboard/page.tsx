@@ -121,6 +121,19 @@ export default function DashboardPage() {
       .catch(() => setName(null));
   }, []);
 
+  useEffect(() => {
+    const onFocus = () => reload();
+    window.addEventListener("focus", onFocus);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") reload();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [reload]);
+
   async function handleDeleteInterview() {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -137,6 +150,21 @@ export default function DashboardPage() {
   }
 
   const items = data?.items ?? [];
+  const hasPending = items.some(
+    (i) =>
+      ["evaluating", "finalizing", "in_progress", "connecting", "paused"].includes(i.status) ||
+      i.report_status === "pending" ||
+      (i.status === "completed" && !i.report_status && i.overall_score === null),
+  );
+
+  useEffect(() => {
+    if (!hasPending) return;
+    const interval = setInterval(() => {
+      reload();
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [hasPending, reload]);
+
   const completed = items.filter((i) => i.overall_score !== null);
   const latest = completed[0];
 

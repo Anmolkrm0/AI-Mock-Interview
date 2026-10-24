@@ -291,14 +291,16 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
 
       // Run mic permission, AudioContext + worklet loading, and token fetch in parallel
       let micError: unknown = null;
-      const micPromise = navigator.mediaDevices
-        .getUserMedia({
+      const micPromise = withTimeout(
+        navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-        })
-        .catch((err) => {
-          micError = err;
-          return null;
-        });
+        }),
+        12_000,
+        "Microphone prompt timed out.",
+      ).catch((err) => {
+        micError = err;
+        return null;
+      });
 
       const audioPromise = Promise.all([
         ctx.resume(),
@@ -503,6 +505,9 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
           <ul className="space-y-3 text-[15px]">
             <li>Find a quiet place. Answer out loud as you would in a real interview.</li>
             <li>You can type an answer, skip a question, or retake an answer at any time.</li>
+            <li>
+              Follow-ups count: if the interviewer asks a follow-up, your response directly enriches your answer and counts toward your final evaluation.
+            </li>
             <li>
               {detail.recording_mode === "none"
                 ? "This interview isn't recorded; the transcript is saved."
