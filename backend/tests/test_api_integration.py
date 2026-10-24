@@ -475,6 +475,56 @@ async def test_full_interview_flow(client, fakes) -> None:
         assert {u.operation for u in usage} >= {"parse_resume", "plan_interview", "evaluate_interview"}
 
 
+async def test_report_and_dashboard_work_when_ai_provider_down(client, fakes) -> None:
+    registry, _ = fakes
+    user = uuid.uuid4()
+    iid, detail = await ready_interview(client, user)
+    q = detail["questions"]
+    await client.post(f"/api/v1/interviews/{iid}/live-token", headers=auth(user))
+    await client.post(
+        f"/api/v1/interviews/{iid}/events",
+        headers=auth(user),
+        json={"events": [{"client_event_id": str(uuid.uuid4()), "event_type": "session_started"}]},
+    )
+    await client.post(
+        f"/api/v1/interviews/{iid}/events",
+        headers=auth(user),
+        json={
+            "events": [
+                {
+                    "client_event_id": str(uuid.uuid4()),
+                    "event_type": "answer_submitted",
+                    "question_id": q[0]["id"],
+                    "answer_source": "voice",
+                    "transcript_text": "I built a payments API in Python.",
+                }
+            ]
+        },
+    )
+    await client.post(f"/api/v1/interviews/{iid}/complete", headers=auth(user), json={"reason": "user_ended"})
+    await drain_jobs(fakes)
+
+    # Disable AI providers
+    registry.text.configured = False
+    registry.live.configured = False
+
+    try:
+        rep = await client.get(f"/api/v1/interviews/{iid}/report", headers=auth(user))
+        assert rep.status_code == 200
+        assert rep.json()["report_status"] == "completed"
+
+        dash = await client.get("/api/v1/interviews", headers=auth(user))
+        assert dash.status_code == 200
+        items = dash.json()["items"]
+        assert len(items) >= 1
+        assert items[0]["id"] == str(iid)
+        assert items[0]["overall_score"] is not None
+        assert items[0]["report_status"] == "completed"
+    finally:
+        registry.text.configured = True
+        registry.live.configured = True
+
+
 async def test_user_isolation(client) -> None:
     owner, intruder = uuid.uuid4(), uuid.uuid4()
     iid, detail = await ready_interview(client, owner)
@@ -1184,6 +1234,7 @@ async def test_admin_dashboard_full_aggregates_and_privacy(client, monkeypatch) 
 
     assert ov["interviews"]["started"] >= 2
     assert ov["interviews"]["completed"] >= 1
+    assert ov["interviews"]["completion_rate"] == 50.0
     assert ov["averages"]["overall_score"] == 85.0
     assert ov["feedback"]["count"] >= 1
     assert ov["feedback"]["average_rating"] == 5.0
@@ -1248,3 +1299,27 @@ async def test_admin_dashboard_full_aggregates_and_privacy(client, monkeypatch) 
         assert "I investigated a subtle race condition in production." not in resp_text
         assert "Jane Doe - Backend Engineer" not in resp_text
         assert "Senior Backend Engineer. We are hiring" not in resp_text
+
+
+async def test_live_token_endpoint_does_not_call_document_or_planner_services(
+    client, fakes, monkeypatch
+) -> None:
+    from unittest.mock import MagicMock
+
+    from app.services import document_service, interview_planner
+
+    registry, _ = fakes
+    user = uuid.uuid4()
+    iid, _ = await ready_interview(client, user)
+
+    doc_mock = MagicMock()
+    planner_mock = MagicMock()
+    monkeypatch.setattr(document_service, "parse_document", doc_mock)
+    monkeypatch.setattr(interview_planner, "generate_plan", planner_mock)
+
+    r = await client.post(f"/api/v1/interviews/{iid}/live-token", headers=auth(user))
+    assert r.status_code == 200, r.text
+    token_data = r.json()
+    assert token_data["token"].startswith("auth_tokens/")
+    assert not doc_mock.called
+    assert not planner_mock.called

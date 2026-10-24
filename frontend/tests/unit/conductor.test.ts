@@ -6,7 +6,7 @@ vi.mock("@/lib/live/audio", async () => await import("./fakes/live-fakes"));
 vi.mock("@/lib/supabase/client", () => ({ getSupabaseBrowser: () => ({}) }));
 
 import { InterviewConductor } from "@/lib/live/interview-conductor";
-import type { InterviewDetail, QuestionOut } from "@/types/api";
+import type { InterviewDetail, LiveTokenOut, QuestionOut } from "@/types/api";
 
 import { live } from "./fakes/live-fakes";
 
@@ -67,6 +67,12 @@ describe("InterviewConductor", () => {
     expect(c.getSnapshot().phase).toBe("live");
     expect(eventsOf("session_started")).toHaveLength(1);
     expect(c.remainingSeconds()).toBeGreaterThan(1190);
+    expect(c.getSnapshot().currentIndex).toBeNull();
+
+    // Advance to Question 1 after warm-up
+    s1.emit({
+      toolCall: { functionCalls: [{ id: "f0", name: "advance_to_question", args: { next_question_number: 1 } }] },
+    });
     expect(c.getSnapshot().currentIndex).toBe(0);
 
     // Interviewer asks Q1, candidate answers by voice.
@@ -81,7 +87,7 @@ describe("InterviewConductor", () => {
     s1.emit({
       toolCall: { functionCalls: [{ id: "f1", name: "advance_to_question", args: { next_question_number: 2 } }] },
     });
-    expect(JSON.stringify(s1.toolResponses[0])).toContain("Question 2 text?");
+    expect(JSON.stringify(s1.toolResponses.at(-1))).toContain("Question 2 text?");
     expect(c.getSnapshot().questions[0]!.status).toBe("answered");
     expect(c.getSnapshot().currentIndex).toBe(1);
 
@@ -151,15 +157,151 @@ describe("InterviewConductor", () => {
     const c = new InterviewConductor({ detail: detail(), ctx: {} as AudioContext, mic: {} as MediaStream });
     await c.start();
     const s = live.sessions[0]!;
-    for (const n of [2, 3, 4, 5]) {
-      s.emit({ serverContent: { inputTranscription: { text: `answer ${n}` } } });
-      s.emit({ serverContent: { outputTranscription: { text: "ok" } } });
+    for (const n of [1, 2, 3, 4, 5]) {
+      if (n > 1) {
+        s.emit({ serverContent: { inputTranscription: { text: `answer ${n - 1}` } } });
+        s.emit({ serverContent: { outputTranscription: { text: "ok" } } });
+      }
       s.emit({
         toolCall: { functionCalls: [{ id: `f${n}`, name: "advance_to_question", args: { next_question_number: n } }] },
       });
     }
+    s.emit({ serverContent: { inputTranscription: { text: "answer 4" } } });
+    s.emit({ serverContent: { outputTranscription: { text: "ok" } } });
+    s.emit({
+      toolCall: { functionCalls: [{ id: "f5", name: "advance_to_question", args: { next_question_number: 5 } }] },
+    });
     expect(JSON.stringify(s.toolResponses.at(-1))).toContain("end_interview");
     await c.finish("all_questions_done");
     expect(eventsOf("answer_submitted")).toHaveLength(4);
   });
+
+  it("warm-up speech before question 1 creates no question_asked or answer_submitted events, and the first question's timer starts only when question 1 is asked", async () => {
+    const c = new InterviewConductor({ detail: detail(), ctx: {} as AudioContext, mic: {} as MediaStream });
+    await c.start();
+    const s = live.sessions[0]!;
+
+    expect(c.getSnapshot().currentIndex).toBeNull();
+    expect(eventsOf("question_asked")).toHaveLength(0);
+    expect(eventsOf("answer_submitted")).toHaveLength(0);
+
+    // Warm-up turns between interviewer and candidate
+    s.emit({ serverContent: { outputTranscription: { text: "Hi! How are you feeling today?" } } });
+    s.emit({ serverContent: { turnComplete: true } });
+    s.emit({ serverContent: { inputTranscription: { text: "I'm feeling excited, ready for the interview!" } } });
+    s.emit({ serverContent: { turnComplete: true } });
+    s.emit({ serverContent: { outputTranscription: { text: "Glad to hear that. Let's begin." } } });
+    s.emit({ serverContent: { turnComplete: true } });
+
+    // No question events should have been created during warm-up
+    expect(eventsOf("question_asked")).toHaveLength(0);
+    expect(eventsOf("answer_submitted")).toHaveLength(0);
+    expect(c.getSnapshot().questions[0]!.status).toBe("pending");
+
+    // Advance to question 1
+    s.emit({
+      toolCall: { functionCalls: [{ id: "f1", name: "advance_to_question", args: { next_question_number: 1 } }] },
+    });
+
+    // Question 1 is now asked and active
+    expect(c.getSnapshot().currentIndex).toBe(0);
+    expect(c.getSnapshot().questions[0]!.status).toBe("asked");
+    await c.flushEvents();
+    expect(eventsOf("question_asked")).toHaveLength(1);
+    expect(eventsOf("question_asked")[0]!.question_id).toBe("q1");
+    await c.finish("user_ended");
+  });
+
+  it("sends kickoff text immediately on setupComplete of a fresh session, and does not send kickoff on reconnect or resume", async () => {
+    const c = new InterviewConductor({ detail: detail(), ctx: {} as AudioContext, mic: {} as MediaStream });
+    await c.start();
+    const s1 = live.sessions[0]!;
+
+    expect(s1.texts).not.toContain("[CONTROL] The candidate has joined. Greet them now and begin.");
+
+    // setupComplete reported by session
+    s1.emit({ setupComplete: {} });
+
+    // Kickoff is sent immediately with no delay
+    expect(s1.texts).toContain("[CONTROL] The candidate has joined. Greet them now and begin.");
+
+    // Simulate connection drop and reconnect
+    s1.emit({ sessionResumptionUpdate: { resumable: true, newHandle: "handle-1" } });
+    s1.drop();
+    await new Promise((r) => setTimeout(r, 1100));
+    await tick();
+    const s2 = live.sessions[1]!;
+
+    // On reconnect, setupComplete does not send kickoff
+    s2.emit({ setupComplete: {} });
+    expect(s2.texts).not.toContain("[CONTROL] The candidate has joined. Greet them now and begin.");
+  });
+
+  it("does not send kickoff on resume of an interview already in progress", async () => {
+    const resumedDetail = detail();
+    resumedDetail.started_at = new Date().toISOString();
+    resumedDetail.questions[0]!.status = "asked";
+
+    const c = new InterviewConductor({ detail: resumedDetail, ctx: {} as AudioContext, mic: {} as MediaStream });
+    await c.start();
+    const s = live.sessions[0]!;
+
+    s.emit({ setupComplete: {} });
+    expect(s.texts).not.toContain("[CONTROL] The candidate has joined. Greet them now and begin.");
+  });
+
+  it("token fetch, mic and audio setup are started in parallel without awaiting each other", async () => {
+    let tokenResolved = false;
+    let micResolved = false;
+    let audioResolved = false;
+
+    // Simulate concurrent promises
+    const tokenPromise = new Promise<LiveTokenOut>((resolve) => {
+      setTimeout(() => {
+        tokenResolved = true;
+        resolve({
+          provider: "fake",
+          token: "auth_tokens/parallel-token",
+          model: "fake-live",
+          api_version: "v1alpha",
+          expires_at: new Date(Date.now() + 1800e3).toISOString(),
+          new_session_expires_at: new Date(Date.now() + 60e3).toISOString(),
+          connect_config: { responseModalities: ["AUDIO"] },
+          deadline_at: null,
+          server_time: new Date().toISOString(),
+        });
+      }, 10);
+    });
+
+    const micPromise = new Promise<MediaStream>((resolve) => {
+      setTimeout(() => {
+        micResolved = true;
+        resolve({} as MediaStream);
+      }, 10);
+    });
+
+    const audioPromise = new Promise<AudioContext>((resolve) => {
+      setTimeout(() => {
+        audioResolved = true;
+        resolve({} as AudioContext);
+      }, 10);
+    });
+
+    // All three start concurrently in Promise.all
+    const [mic, ctx, token] = await Promise.all([micPromise, audioPromise, tokenPromise]);
+    expect(tokenResolved).toBe(true);
+    expect(micResolved).toBe(true);
+    expect(audioResolved).toBe(true);
+
+    const c = new InterviewConductor({
+      detail: detail(),
+      ctx,
+      mic,
+      token,
+      startClickedAt: performance.now(),
+    });
+    await c.start();
+    expect(c.getSnapshot().phase).toBe("live");
+  });
 });
+

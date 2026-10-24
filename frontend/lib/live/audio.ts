@@ -22,6 +22,19 @@ export function parseSampleRate(mimeType: string | undefined, fallback = 24000):
   return match ? Number(match[1]) : fallback;
 }
 
+const loadedContexts = new WeakSet<AudioContext>();
+
+/** Preload the PCM capture worklet module into an AudioContext once. */
+export async function preloadAudioWorklet(ctx: AudioContext): Promise<void> {
+  if (loadedContexts.has(ctx)) return;
+  try {
+    await ctx.audioWorklet.addModule("/worklets/pcm-capture.js");
+    loadedContexts.add(ctx);
+  } catch {
+    if (ctx.audioWorklet) loadedContexts.add(ctx);
+  }
+}
+
 /**
  * Captures the microphone as 16 kHz PCM via an AudioWorklet.
  * `muted` stops sending audio without releasing the device (used for typed answers).
@@ -39,7 +52,7 @@ export class MicCapture {
   ) {}
 
   async start(): Promise<void> {
-    await this.ctx.audioWorklet.addModule("/worklets/pcm-capture.js");
+    await preloadAudioWorklet(this.ctx);
     this.source = this.ctx.createMediaStreamSource(this.stream);
     this.node = new AudioWorkletNode(this.ctx, "pcm-capture", { processorOptions: { targetRate: 16000 } });
     this.node.port.onmessage = (e: MessageEvent<{ type: string; buffer?: ArrayBuffer; value?: number }>) => {
@@ -103,7 +116,8 @@ export class PcmPlayer {
     const source = this.ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(this.output);
-    const startAt = Math.max(this.ctx.currentTime + 0.03, this.nextTime);
+    const isFirst = this.nextTime <= this.ctx.currentTime;
+    const startAt = isFirst ? this.ctx.currentTime : Math.max(this.ctx.currentTime + 0.03, this.nextTime);
     source.start(startAt);
     this.nextTime = startAt + buffer.duration;
     this.sources.add(source);

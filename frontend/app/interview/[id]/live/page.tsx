@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
+import { PhoneNotice } from "@/components/common/phone-notice";
 import { Wordmark } from "@/components/common/site-header-client";
 import { LoadError, WakingNotice } from "@/components/common/states";
 import {
@@ -23,12 +24,13 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { Notice, Skeleton } from "@/components/ui/feedback";
 import { useAsync } from "@/hooks/use-async";
 import { env } from "@/lib/env";
+import { preloadAudioWorklet } from "@/lib/live/audio";
 import { InterviewConductor, type Snapshot } from "@/lib/live/interview-conductor";
 import { InterviewRecorder, pendingRecordings } from "@/lib/media/recorder";
 import { planRecording } from "@/lib/media/recording-budget";
 import { formatBytes } from "@/lib/utils";
 import { interviewsApi } from "@/services/interviews";
-import type { InterviewDetail } from "@/types/api";
+import type { InterviewDetail, LiveTokenOut } from "@/types/api";
 
 type MediaProblem = { title: string; message: string } | null;
 
@@ -151,6 +153,7 @@ const EMPTY_SNAPSHOT: Snapshot = {
   transcript: [],
   partial: null,
   interviewerSpeaking: false,
+  hasGreetingStarted: false,
   micLevel: 0,
   inputMode: "voice",
   headphones: false,
@@ -162,6 +165,14 @@ const EMPTY_SNAPSHOT: Snapshot = {
 
 function InterviewRoom({ detail }: { detail: InterviewDetail }) {
   const router = useRouter();
+
+  // Pre-fetch live token as soon as interview detail is available
+  useEffect(() => {
+    if (detail?.id) {
+      void interviewsApi.liveToken(detail.id);
+    }
+  }, [detail?.id]);
+
   const conductorRef = useRef<InterviewConductor | null>(null);
   const recorderRef = useRef<InterviewRecorder | null>(null);
   const streamsRef = useRef<{ mic: MediaStream | null; camera: MediaStream | null; ctx: AudioContext | null }>({
@@ -224,46 +235,88 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
-  async function join() {
+  async function join(startClickedAt: number) {
     setJoining(true);
     setMediaProblem(null);
-    let mic: MediaStream;
-    try {
-      mic = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setMediaProblem({
+        title: "Microphone access is not supported",
+        message:
+          "Your browser does not support microphone access (getUserMedia). We recommend using Chrome on a laptop.",
       });
+      setJoining(false);
+      return;
+    }
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx || !AudioCtx.prototype?.audioWorklet) {
+      setMediaProblem({
+        title: "Audio processing is not supported",
+        message:
+          "Your browser lacks AudioWorklet support required for real-time speech. We recommend using Chrome on a laptop.",
+      });
+      setJoining(false);
+      return;
+    }
+
+    // Run mic permission, AudioContext + worklet loading, and token fetch in parallel
+    const micPromise = navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    });
+    const audioPromise = (async () => {
+      const ctx = new AudioCtx();
+      await Promise.all([ctx.resume(), preloadAudioWorklet(ctx)]);
+      return ctx;
+    })();
+    const tokenPromise = interviewsApi.liveToken(detail.id);
+
+    let mic: MediaStream;
+    let ctx: AudioContext;
+    let token: LiveTokenOut;
+    try {
+      [mic, ctx, token] = await Promise.all([micPromise, audioPromise, tokenPromise]);
     } catch (e) {
       setMediaProblem(describeMediaError(e, "microphone"));
       setJoining(false);
       return;
     }
-    let camera: MediaStream | null = null;
-    try {
-      camera = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 15, max: 24 } },
-      });
-    } catch (e) {
-      if (detail.recording_mode === "video") {
-        const p = describeMediaError(e, "camera");
-        toast.warning(`${p.title}. The interview continues; the recording will be audio only.`);
-      }
-    }
-    const ctx = new AudioContext();
-    await ctx.resume();
-    streamsRef.current = { mic, camera, ctx };
-    setCameraOn(Boolean(camera));
-    if (videoRef.current && camera) videoRef.current.srcObject = camera;
 
-    const engine = new InterviewConductor({ detail, ctx, mic });
+    streamsRef.current = { mic, camera: null, ctx };
+
+    const engine = new InterviewConductor({ detail, ctx, mic, token, startClickedAt });
+    engine.recordPhase("mic permission granted");
+    engine.recordPhase("AudioContext/worklet ready");
+    engine.recordPhase("live token received");
     engine.setHeadphones(headphones);
     engine.onFinished = (reason) => void wrapUp(reason);
     conductorRef.current = engine;
     setConductor(engine);
+    setJoined(true);
+    setJoining(false);
 
-    const plan =
-      detail.recording_mode === "video" && !camera
-        ? planRecording("audio", detail.duration_minutes, env.recordingMaxBytes)
-        : recordingPlan;
+    // Connect and start interview immediately without blocking on camera or recorder
+    void engine.start();
+
+    // In background: handle camera if video mode is configured
+    if (detail.recording_mode === "video") {
+      navigator.mediaDevices
+        .getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 15, max: 24 } },
+        })
+        .then((camera) => {
+          streamsRef.current.camera = camera;
+          setCameraOn(true);
+          if (videoRef.current) videoRef.current.srcObject = camera;
+        })
+        .catch((e) => {
+          const p = describeMediaError(e, "camera");
+          toast.warning(`${p.title}. The interview continues; the recording will be audio only.`);
+        });
+    }
+
+    // In background: start media recorder once engine is up
+    const plan = recordingPlan;
     if (plan.mode !== "none") {
       const recorder = new InterviewRecorder(plan, env.recordingMaxBytes, setRecordingBytes, () => {
         setRecordingStopped(true);
@@ -272,16 +325,13 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
         );
       });
       if (recorder.supported) {
-        recorder.start(ctx, mic, engine.player.recordTap.stream, camera);
+        recorder.start(ctx, mic, engine.player.recordTap.stream, streamsRef.current.camera);
         recorderRef.current = recorder;
         setRecordingActive(true);
       } else {
         toast.warning("This browser can't record. The interview continues without a recording.");
       }
     }
-    setJoined(true);
-    setJoining(false);
-    await engine.start();
   }
 
   useEffect(() => {
@@ -314,6 +364,7 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
   if (!joined) {
     return (
       <Shell>
+        <PhoneNotice className="mb-6" />
         <h1 className="text-4xl font-semibold">{resumed ? "Rejoin your interview" : "Ready when you are"}</h1>
         <p className="mt-3 text-slate">
           {detail.job_role}, {detail.duration_minutes} minutes.{" "}
@@ -353,7 +404,7 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
               {mediaProblem.message}
             </Notice>
           )}
-          <Button size="lg" onClick={join} loading={joining}>
+          <Button size="lg" onClick={() => void join(performance.now())} loading={joining}>
             {resumed ? "Rejoin interview" : "Join interview"}
           </Button>
           <p className="text-sm text-slate">
@@ -418,10 +469,18 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
 
           <div className="rounded-lg border border-line bg-surface p-6 sm:p-8">
             <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-              <InterviewerPresence speaking={snap.interviewerSpeaking} listening={live && snap.inputMode === "voice"} />
+              <InterviewerPresence
+                speaking={snap.interviewerSpeaking}
+                listening={live && snap.hasGreetingStarted && snap.inputMode === "voice"}
+                connecting={(snap.phase === "connecting" || (!snap.hasGreetingStarted && !resumed)) && !snap.interviewerSpeaking}
+              />
               <MicMeter
                 level={snap.micLevel}
-                muted={snap.inputMode === "text" || (!snap.headphones && snap.interviewerSpeaking)}
+                muted={
+                  snap.inputMode === "text" ||
+                  (!snap.hasGreetingStarted && !resumed) ||
+                  (!snap.headphones && snap.interviewerSpeaking)
+                }
               />
             </div>
             <QuestionPanel questions={snap.questions} currentIndex={snap.currentIndex} />

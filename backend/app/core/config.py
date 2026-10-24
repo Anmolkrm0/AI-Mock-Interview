@@ -65,7 +65,7 @@ class Settings(BaseModel):
     gemini_evaluation_model: str = "gemini-3.5-flash-lite"
     gemini_live_model: str = "gemini-3.8-live"
     gemini_live_api_version: str = "v1alpha"
-    gemini_live_voice: str = ""
+    gemini_live_voice: str = "Kore"
     gemini_use_json_schema: bool = True
     groq_api_key: str = ""
     groq_api_base: str = "https://api.groq.com/openai/v1"

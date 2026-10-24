@@ -31,8 +31,7 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []): AsyncSt
     setError(null);
     setSlow(false);
     const slowTimer = setTimeout(() => active && setSlow(true), 4000);
-    fnRef
-      .current()
+    Promise.resolve(fnRef.current())
       .then((value) => active && setData(value))
       .catch((e: unknown) => active && setError(e instanceof Error ? e : new Error(String(e))))
       .finally(() => {

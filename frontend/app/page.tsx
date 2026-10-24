@@ -41,35 +41,38 @@ const modes = [
 
 function HeroTranscript() {
   return (
-    <figure
-      aria-label="Example of an interview transcript with scored evidence"
-      className="relative rounded-lg border border-line bg-surface p-6 sm:p-7"
-    >
-      <div className="space-y-5 text-[15px] leading-relaxed">
-        <div>
-          <p className="mb-1 text-xs font-medium text-slate">Interviewer</p>
-          <p>You mentioned cutting API latency. What did you change, specifically?</p>
+    <div>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate">Example report</p>
+      <figure
+        aria-label="Example of an interview transcript with scored evidence"
+        className="relative rounded-lg border border-line bg-surface p-6 sm:p-7"
+      >
+        <div className="space-y-5 text-[15px] leading-relaxed">
+          <div>
+            <p className="mb-1 text-xs font-medium text-slate">Interviewer</p>
+            <p>You mentioned cutting API latency. What did you change, specifically?</p>
+          </div>
+          <div>
+            <p className="mb-1 text-xs font-medium text-slate">You</p>
+            <p>
+              We were hitting Postgres on every request, so I{" "}
+              <span className="mark-draw">added a read-through Redis cache for the catalogue endpoints</span>. After
+              rollout, <span className="mark-draw">p95 dropped from 480 to 190 milliseconds</span>, and I set up alerts on
+              cache hit rate.
+            </p>
+          </div>
         </div>
-        <div>
-          <p className="mb-1 text-xs font-medium text-slate">You</p>
-          <p>
-            We were hitting Postgres on every request, so I{" "}
-            <span className="mark-draw">added a read-through Redis cache for the catalogue endpoints</span>. After
-            rollout, <span className="mark-draw">p95 dropped from 480 to 190 milliseconds</span>, and I set up alerts on
-            cache hit rate.
+        <figcaption className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-4">
+          <div>
+            <p className="font-display text-2xl font-semibold">4 / 5</p>
+            <p className="text-sm text-slate">Strong and well-supported</p>
+          </div>
+          <p className="max-w-[16rem] text-left text-sm text-slate sm:text-right">
+            Highlighted lines were found word-for-word in the answer.
           </p>
-        </div>
-      </div>
-      <figcaption className="mt-6 flex items-center justify-between gap-4 border-t border-line pt-4">
-        <div>
-          <p className="font-display text-2xl font-semibold">4 / 5</p>
-          <p className="text-sm text-slate">Strong and well-supported</p>
-        </div>
-        <p className="max-w-[16rem] text-right text-sm text-slate">
-          Highlighted lines were found word-for-word in the answer.
-        </p>
-      </figcaption>
-    </figure>
+        </figcaption>
+      </figure>
+    </div>
   );
 }
 

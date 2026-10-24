@@ -54,7 +54,7 @@ export function FeedbackForm({
           {[1, 2, 3, 4, 5].map((n) => (
             <label
               key={n}
-              className="cursor-pointer rounded-sm p-1 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ink"
+              className="inline-flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center rounded-sm p-2 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ink"
               onMouseEnter={() => setHover(n)}
             >
               <input

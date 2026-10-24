@@ -16,7 +16,7 @@ export const buttonVariants = cva(
         link: "text-ink underline underline-offset-4 decoration-line-strong hover:decoration-ink px-0",
       },
       size: {
-        sm: "h-9 rounded-sm px-3 text-sm",
+        sm: "min-h-[44px] sm:min-h-9 h-auto py-2 sm:py-0 sm:h-9 rounded-sm px-3 text-sm",
         md: "h-11 rounded-md px-5 text-[15px]",
         lg: "h-13 rounded-md px-7 text-base",
         icon: "size-11 rounded-md",

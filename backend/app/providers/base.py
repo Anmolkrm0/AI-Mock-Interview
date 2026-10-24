@@ -120,17 +120,17 @@ def map_http_error(status: int, message: str, provider: str) -> ProviderError:
             status_code=503,
             retryable=False,
         )
-    if status == 429:
+    if status == 429 or "resource_exhausted" in text or ("quota" in text and "exceeded" in text):
         daily = any(s in text for s in ("per day", "perday", "daily", "quota exceeded for quota metric"))
         if daily or "exhausted" in text and "rate" not in text:
             return ProviderError(
-                "The AI service's free quota is used up for now. Try again later; quotas reset daily.",
+                "Our AI is busy right now. Please try again in a few minutes. Your past reports are still available.",
                 code="AI_PROVIDER_QUOTA_EXHAUSTED",
                 status_code=503,
                 retryable=False,
             )
         return ProviderError(
-            "The AI service is busy. Wait a minute and try again.",
+            "Our AI is busy right now. Please try again in a few minutes. Your past reports are still available.",
             code="AI_PROVIDER_RATE_LIMITED",
             status_code=503,
             retryable=True,

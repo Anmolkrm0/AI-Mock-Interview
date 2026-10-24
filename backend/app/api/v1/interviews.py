@@ -96,7 +96,12 @@ async def list_interviews(
     ).scalar_one()
     rows = (
         await db.execute(
-            select(Interview, Report.overall_score, Report.report_status)
+            select(
+                Interview,
+                Report.overall_score,
+                Report.report_status,
+                Report.evidence_sufficiency,
+            )
             .outerjoin(Report, Report.interview_id == Interview.id)
             .where(Interview.user_id == user.id, Interview.status != "cancelled")
             .order_by(Interview.created_at.desc())
@@ -114,11 +119,14 @@ async def list_interviews(
             status=i.status,
             overall_score=score,
             report_status=rstatus,
+            evidence_sufficiency=rsufficiency,
+            failure_stage=i.failure_stage,
+            failure_code=i.failure_code,
             has_current_recording=bool(current and current.interview_id == i.id),
             created_at=i.created_at,
             completed_at=i.completed_at,
         )
-        for i, score, rstatus in rows
+        for i, score, rstatus, rsufficiency in rows
     ]
     return InterviewPage(
         items=items,

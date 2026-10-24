@@ -371,12 +371,12 @@ function OverviewTab() {
             <p className="mt-1 text-xs text-slate">Distribution across difficulty settings</p>
             <div className="mt-4 space-y-3">
               {[
-                { key: "casual", label: "Casual" },
                 { key: "standard", label: "Standard" },
-                { key: "target_bar", label: "Target Bar" },
+                { key: "target_bar", label: "Target bar" },
+                { key: "stress_test", label: "Stress test" },
               ].map((r) => {
                 const count = data.breakdowns.by_rigor[r.key] ?? 0;
-                const total = Math.max(1, data.interviews.started);
+                const total = Math.max(1, data.interviews.created || data.interviews.started);
                 const pct = Math.round((count / total) * 100);
                 return (
                   <div key={r.key} className="space-y-1">
@@ -400,9 +400,9 @@ function OverviewTab() {
             <h3 className="font-semibold text-ink">Duration Buckets</h3>
             <p className="mt-1 text-xs text-slate">Scheduled interview lengths</p>
             <div className="mt-4 space-y-3">
-              {["15", "30", "45", "60"].map((mins) => {
+              {["10", "20", "30", "45"].map((mins) => {
                 const count = data.breakdowns.by_duration[mins] ?? 0;
-                const total = Math.max(1, data.interviews.started);
+                const total = Math.max(1, data.interviews.created || data.interviews.started);
                 const pct = Math.round((count / total) * 100);
                 return (
                   <div key={mins} className="space-y-1">

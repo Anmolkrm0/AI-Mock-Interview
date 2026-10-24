@@ -73,8 +73,8 @@ const mockOverview = {
     rating_counts: { 1: 1, 2: 2, 3: 5, 4: 14, 5: 20 },
   },
   breakdowns: {
-    by_rigor: { casual: 20, standard: 65, target_bar: 25 },
-    by_duration: { "15": 25, "30": 60, "45": 15, "60": 10 },
+    by_rigor: { standard: 65, target_bar: 25, stress_test: 20 },
+    by_duration: { "10": 25, "20": 60, "30": 15, "45": 10 },
     top_roles: [
       { role: "Backend Engineer", count: 45 },
       { role: "Product Manager", count: 30 },

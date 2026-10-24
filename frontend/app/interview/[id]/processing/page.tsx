@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AppHeader } from "@/components/common/app-header";
+import { WakingNotice } from "@/components/common/states";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Notice, ProgressBar } from "@/components/ui/feedback";
 import { errorMessage } from "@/lib/api";
@@ -151,9 +152,29 @@ export default function ProcessingPage() {
     setUpload({ state: "skipped", progress: 0 });
   }
 
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (status) {
+      setSlow(false);
+      return;
+    }
+    const timer = setTimeout(() => setSlow(true), 4000);
+    return () => clearTimeout(timer);
+  }, [status]);
+
   const evalFailed = status?.status === "failed" && status.failure_stage === "evaluation";
   const evalState: StepState = reportReady ? "done" : evalFailed ? "failed" : status ? "active" : "waiting";
   const answered = status?.progress.answered ?? 0;
+
+  const isQuotaOrRateLimit =
+    status?.failure_code === "AI_PROVIDER_RATE_LIMITED" ||
+    status?.failure_code === "AI_PROVIDER_QUOTA_EXHAUSTED" ||
+    status?.failure_code === "RATE_LIMITED" ||
+    Boolean(status?.failure_code && /quota|rate_limit|resource_exhausted|429/i.test(status.failure_code));
+
+  const evalErrorMessage = isQuotaOrRateLimit
+    ? "Our AI is busy right now. Please try again in a few minutes. Your past reports are still available."
+    : "Scoring didn't finish. Your transcript is saved.";
 
   return (
     <>
@@ -167,6 +188,12 @@ export default function ProcessingPage() {
             ? "Opening it now."
             : "Keep this page open until the recording has uploaded. Scoring usually takes under a minute."}
         </p>
+
+        {slow && !status && (
+          <div className="mt-6">
+            <WakingNotice />
+          </div>
+        )}
 
         {status?.status === "cancelled" ? (
           <Notice
@@ -216,9 +243,7 @@ export default function ProcessingPage() {
             <StepRow state={evalState} title="Scoring your answers">
               {evalFailed ? (
                 <div className="space-y-2">
-                  <p className="text-signal">
-                    Scoring didn&apos;t finish ({status?.failure_code ?? "error"}). Your transcript is saved.
-                  </p>
+                  <p className="text-signal">{evalErrorMessage}</p>
                   <Button size="sm" onClick={retryEvaluation} loading={retrying}>
                     Try scoring again
                   </Button>

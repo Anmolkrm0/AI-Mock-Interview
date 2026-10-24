@@ -243,6 +243,55 @@ def test_build_system_instruction_contains_short_question_and_clarification_rule
     )
 
 
+def test_build_system_instruction_greeting_and_resume() -> None:
+    interview = SimpleNamespace(
+        duration_minutes=20,
+        job_role="Senior Software Engineer",
+        evaluation_rigor="standard",
+    )
+    q1 = SimpleNamespace(
+        sequence_number=1,
+        priority="core",
+        competency="Coding",
+        time_allocation_seconds=120,
+        status="pending",
+        question_text="How do you structure microservices?",
+        follow_up_topics=["scalability"],
+    )
+    # Fresh start with candidate name
+    fresh_instruction = build_system_instruction(
+        interview=interview,  # type: ignore[arg-type]
+        objectives=["Assess backend depth"],
+        questions=[q1],  # type: ignore[arg-type]
+        candidate={"headline": "Backend Engineer"},
+        job_title="Senior Software Engineer",
+        remaining=1200,
+        candidate_first_name="Ritik",
+    )
+    assert "When the candidate joins, speak first, immediately." in fresh_instruction
+    assert "Start with one short sentence (under 10 words)" in fresh_instruction
+    assert "'Hi Ritik, I\\'m your interviewer today.'" in fresh_instruction
+    assert "Before we begin, how are you feeling today?" in fresh_instruction
+    assert "advance_to_question with next_question_number=1" in fresh_instruction
+    assert "The greeting/warm-up is not a planned question" in fresh_instruction
+    assert "never scored" in fresh_instruction
+
+    # Resumed session
+    q1.status = "asked"
+    resume_instruction = build_system_instruction(
+        interview=interview,  # type: ignore[arg-type]
+        objectives=["Assess backend depth"],
+        questions=[q1],  # type: ignore[arg-type]
+        candidate={"headline": "Backend Engineer"},
+        job_title="Senior Software Engineer",
+        remaining=1000,
+        candidate_first_name="Ritik",
+    )
+    assert "This is a reconnection to an interview already in progress." in resume_instruction
+    assert "never repeat the warm greeting or ice-breaker" in resume_instruction
+    assert "Before we begin, how are you feeling about today?" not in resume_instruction
+
+
 # ------------------------------------------------------------- documents
 
 
@@ -456,6 +505,18 @@ def test_provider_error_mapping(status: int, message: str, code: str, retryable:
     err = map_http_error(status, message, "Gemini")
     assert err.code == code and err.retryable is retryable
     assert "AIza" not in err.message
+
+
+def test_provider_429_maps_to_friendly_error() -> None:
+    expected = (
+        "Our AI is busy right now. Please try again in a few minutes. Your past reports are still available."
+    )
+    err1 = map_http_error(429, "Rate limit exceeded", "Gemini")
+    assert err1.message == expected
+    err2 = map_http_error(429, "Quota exceeded for quota metric requests per day", "Gemini")
+    assert err2.message == expected
+    err3 = map_http_error(503, "RESOURCE_EXHAUSTED", "Gemini")
+    assert err3.message == expected
 
 
 def test_log_redaction() -> None:

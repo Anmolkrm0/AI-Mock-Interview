@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { LoadError } from "@/components/common/states";
+import { LoadError, WakingNotice } from "@/components/common/states";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/feedback";
@@ -19,12 +19,14 @@ export default function SettingsPage() {
   const [email, setEmail] = useState<string | null>(null);
   const [recording, setRecording] = useState<RecordingOut | null>(null);
   const [loading, setLoading] = useState(true);
+  const [slow, setSlow] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [playUrl, setPlayUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    const slowTimer = setTimeout(() => setSlow(true), 4000);
     getSupabaseBrowser()
       .auth.getUser()
       .then(({ data }) => setEmail(data.user?.email ?? null))
@@ -36,7 +38,12 @@ export default function SettingsPage() {
         if (e instanceof ApiError && e.status === 404) setRecording(null);
         else setError(e instanceof Error ? e : new Error(String(e)));
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        clearTimeout(slowTimer);
+        setLoading(false);
+        setSlow(false);
+      });
+    return () => clearTimeout(slowTimer);
   }, []);
 
   async function play() {
@@ -84,6 +91,11 @@ export default function SettingsPage() {
           Reports and transcripts are always kept.
         </p>
         <div className="mt-5">
+          {slow && loading && (
+            <div className="mb-4">
+              <WakingNotice />
+            </div>
+          )}
           {loading && <Skeleton className="h-20 w-full" />}
           {error && <LoadError error={error} />}
           {!loading && !error && !recording && (

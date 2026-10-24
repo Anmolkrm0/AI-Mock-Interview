@@ -53,7 +53,15 @@ export function ConnectionStatus({ phase }: { phase: Phase }) {
 }
 
 /** Interviewer presence: a quiet set of bars that move only while it speaks. */
-export function InterviewerPresence({ speaking, listening }: { speaking: boolean; listening: boolean }) {
+export function InterviewerPresence({
+  speaking,
+  listening,
+  connecting,
+}: {
+  speaking: boolean;
+  listening: boolean;
+  connecting?: boolean;
+}) {
   return (
     <div className="flex items-center gap-4">
       <div aria-hidden className="flex h-10 items-end gap-1">
@@ -69,7 +77,13 @@ export function InterviewerPresence({ speaking, listening }: { speaking: boolean
         ))}
       </div>
       <p className="text-sm font-medium" aria-live="polite">
-        {speaking ? "Interviewer is speaking" : listening ? "Listening to you" : "Waiting"}
+        {speaking
+          ? "Interviewer is speaking"
+          : connecting
+            ? "Connecting…"
+            : listening
+              ? "Start speaking"
+              : "Waiting"}
       </p>
     </div>
   );

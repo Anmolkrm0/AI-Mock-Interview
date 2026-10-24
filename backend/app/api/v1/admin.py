@@ -128,7 +128,7 @@ async def get_overview(
     completed_cnt = int(i_res["completed"])
     cancelled_cnt = int(i_res["cancelled"])
     failed_cnt = int(i_res["failed"])
-    completion_rate = round(completed_cnt / started_cnt, 4) if started_cnt > 0 else 0.0
+    completion_rate = round((completed_cnt / started_cnt) * 100, 1) if started_cnt > 0 else 0.0
 
     interviews_out = OverviewInterviewsOut(
         created=created_cnt,
@@ -152,9 +152,14 @@ async def get_overview(
     q_per_completed_sql = """
         SELECT coalesce(round(avg(answered_cnt)::numeric, 1), 0.0) AS avg_answered
         FROM (
-            SELECT i.id, count(q.id) AS answered_cnt
+            SELECT i.id, count(latest_a.question_id) AS answered_cnt
             FROM interviews i
-            LEFT JOIN questions q ON q.interview_id = i.id AND q.status = 'answered'
+            LEFT JOIN questions q ON q.interview_id = i.id
+            LEFT JOIN (
+                SELECT a.question_id, a.is_skipped,
+                       row_number() OVER (PARTITION BY a.question_id ORDER BY a.attempt_number DESC) AS rn
+                FROM answer_attempts a
+            ) latest_a ON latest_a.question_id = q.id AND latest_a.rn = 1 AND latest_a.is_skipped = false
             WHERE i.status = 'completed' AND i.created_at >= now() - (:days * interval '1 day')
             GROUP BY i.id
         ) t
@@ -617,12 +622,17 @@ async def list_interviews(
         {auth_join}
         LEFT JOIN (
             SELECT
-                interview_id,
-                count(*) AS total,
-                count(*) FILTER (WHERE status = 'answered') AS answered,
-                count(*) FILTER (WHERE status = 'skipped') AS skipped
-            FROM questions
-            GROUP BY interview_id
+                q.interview_id,
+                count(DISTINCT q.id) AS total,
+                count(DISTINCT q.id) FILTER (WHERE latest_a.is_skipped = false) AS answered,
+                count(DISTINCT q.id) FILTER (WHERE latest_a.is_skipped = true OR q.status = 'skipped') AS skipped
+            FROM questions q
+            LEFT JOIN (
+                SELECT a.question_id, a.is_skipped,
+                       row_number() OVER (PARTITION BY a.question_id ORDER BY a.attempt_number DESC) AS rn
+                FROM answer_attempts a
+            ) latest_a ON latest_a.question_id = q.id AND latest_a.rn = 1
+            GROUP BY q.interview_id
         ) q_counts ON q_counts.interview_id = i.id
         LEFT JOIN reports r ON r.interview_id = i.id
         LEFT JOIN feedback f ON f.interview_id = i.id

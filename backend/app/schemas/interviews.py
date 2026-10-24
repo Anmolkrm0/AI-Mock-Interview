@@ -85,6 +85,9 @@ class InterviewSummary(BaseModel):
     status: str
     overall_score: float | None
     report_status: str | None
+    evidence_sufficiency: str | None = None
+    failure_stage: str | None = None
+    failure_code: str | None = None
     has_current_recording: bool
     created_at: datetime
     completed_at: datetime | None

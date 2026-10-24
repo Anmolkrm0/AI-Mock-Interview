@@ -4,10 +4,13 @@ import { Disc3, Plus } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { toast } from "sonner";
+
 import { LoadError, WakingNotice } from "@/components/common/states";
 import { buttonVariants } from "@/components/ui/button";
 import { Badge, Skeleton } from "@/components/ui/feedback";
 import { useAsync } from "@/hooks/use-async";
+import { errorMessage } from "@/lib/api";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { cn, formatDate, RIGOR_LABELS } from "@/lib/utils";
 import { interviewsApi } from "@/services/interviews";
@@ -40,14 +43,65 @@ function primaryLink(item: InterviewSummary): { href: string; label: string } {
   return { href: `/interview/setup`, label: "Set up again" };
 }
 
-function ScoreCell({ score }: { score: number | null }) {
-  if (score === null) return <span className="text-slate">—</span>;
-  return (
-    <span className="font-display text-2xl font-semibold tabular-nums">
-      {Math.round(score)}
-      <span className="text-sm font-normal text-slate">/100</span>
-    </span>
-  );
+function ScoreCell({ item, onRetry }: { item: InterviewSummary; onRetry?: () => void }) {
+  const [retrying, setRetrying] = useState(false);
+
+  if (item.overall_score !== null) {
+    return (
+      <span className="font-display text-2xl font-semibold tabular-nums">
+        {Math.round(item.overall_score)}
+        <span className="text-sm font-normal text-slate">/100</span>
+      </span>
+    );
+  }
+
+  const isFailed = item.report_status === "failed" || item.failure_stage === "evaluation";
+  if (isFailed) {
+    const handleRetry = async () => {
+      try {
+        setRetrying(true);
+        await interviewsApi.retryEvaluation(item.id);
+        toast.success("Retrying evaluation…");
+        onRetry?.();
+      } catch (e) {
+        toast.error(errorMessage(e));
+      } finally {
+        setRetrying(false);
+      }
+    };
+
+    return (
+      <span className="inline-flex items-center gap-1 text-sm text-signal">
+        Report failed —{" "}
+        <button
+          type="button"
+          onClick={handleRetry}
+          disabled={retrying}
+          className="font-medium underline hover:text-ink disabled:opacity-50"
+        >
+          {retrying ? "retrying…" : "retry"}
+        </button>
+      </span>
+    );
+  }
+
+  if (
+    item.evidence_sufficiency === "insufficient" ||
+    (item.report_status === "completed" && item.overall_score === null)
+  ) {
+    return <span className="text-sm text-slate">Not enough answers to score</span>;
+  }
+
+  if (
+    item.report_status === "pending" ||
+    item.status === "evaluating" ||
+    item.status === "finalizing" ||
+    (item.status === "completed" && !item.report_status)
+  ) {
+    return <span className="text-sm text-slate">Report processing</span>;
+  }
+
+  return <span className="text-slate">—</span>;
 }
 
 export default function DashboardPage() {
@@ -108,7 +162,7 @@ export default function DashboardPage() {
           </div>
         )}
         {!loading && items.length > 0 && (
-          <div className="overflow-hidden rounded-lg border border-line bg-surface">
+          <div className="overflow-x-auto rounded-lg border border-line bg-surface">
             <table className="w-full text-left text-[15px]">
               <thead className="border-b border-line bg-paper text-sm text-slate">
                 <tr>
@@ -151,7 +205,7 @@ export default function DashboardPage() {
                         {item.duration_minutes} min, {RIGOR_LABELS[item.evaluation_rigor]}
                       </td>
                       <td className="px-5 py-4">
-                        <ScoreCell score={item.overall_score} />
+                        <ScoreCell item={item} onRetry={reload} />
                       </td>
                       <td className="px-5 py-4 text-right">
                         <Link href={link.href} className={buttonVariants({ variant: "secondary", size: "sm" })}>

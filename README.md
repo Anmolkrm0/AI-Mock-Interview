@@ -1,5 +1,13 @@
 # AI Mock Interview
 
+## For judges
+
+- **Live URL:** `https://<your-app>.onrender.com`
+- **The one journey:** Upload resume + job description → 10-minute voice interview → report with evidence.
+- **Advisory:** Best on a laptop with Chrome and headphones; first load can take up to a minute while the free server wakes.
+
+---
+
 Practice a spoken interview for the exact job you're applying to. Upload a resume and a job description, pick the role, length and how hard the interviewer should push, then answer an AI interviewer out loud. Afterwards, every answer is scored on a fixed 1–5 rubric with the exact lines from your answer that support the score.
 
 - **Frontend:** Next.js 16 (App Router), React 19, TypeScript (strict), Tailwind CSS 4, shadcn/ui-style components, React Hook Form + Zod

@@ -141,8 +141,50 @@ export async function pingBackend(timeoutMs = 60_000): Promise<boolean> {
   return false;
 }
 
+export const AI_BUSY_MESSAGE =
+  "Our AI is busy right now. Please try again in a few minutes. Your past reports are still available.";
+
+function isRateLimitOrQuota(
+  status: number | undefined,
+  code: string | undefined,
+  message: string | undefined,
+): boolean {
+  if (status === 429) return true;
+  const c = (code || "").toUpperCase();
+  if (
+    c === "AI_PROVIDER_RATE_LIMITED" ||
+    c === "AI_PROVIDER_QUOTA_EXHAUSTED" ||
+    c === "RATE_LIMITED" ||
+    c === "DAILY_INTERVIEW_LIMIT" ||
+    c === "LIVE_TOKEN_LIMIT"
+  ) {
+    return true;
+  }
+  const m = (message || "").toLowerCase();
+  if (
+    m.includes("quota") ||
+    m.includes("rate limit") ||
+    m.includes("resource_exhausted") ||
+    m.includes("too many requests") ||
+    m.includes("ai is busy")
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error) return error.message;
+  if (error instanceof ApiError) {
+    if (isRateLimitOrQuota(error.status, error.code, error.message)) {
+      return AI_BUSY_MESSAGE;
+    }
+    return error.message;
+  }
+  if (error instanceof Error) {
+    if (isRateLimitOrQuota(undefined, undefined, error.message)) {
+      return AI_BUSY_MESSAGE;
+    }
+    return error.message;
+  }
   return "Something went wrong. Try again.";
 }

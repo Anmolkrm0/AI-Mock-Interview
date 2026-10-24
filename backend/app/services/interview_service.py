@@ -546,8 +546,14 @@ async def complete_interview(db: AsyncSession, *, interview: Interview, reason: 
 
 
 async def retry_evaluation(db: AsyncSession, interview: Interview) -> Interview:
-    if interview.status == "failed" and interview.failure_stage == "evaluation":
-        transition(interview, "evaluating")
+    report_status = (
+        await db.execute(select(Report.report_status).where(Report.interview_id == interview.id))
+    ).scalar_one_or_none()
+    if (
+        interview.status == "failed" and interview.failure_stage == "evaluation"
+    ) or report_status == "failed":
+        if interview.status != "evaluating":
+            transition(interview, "evaluating")
         await enqueue_evaluation(db, interview.id)
         return interview
     if interview.status in ("evaluating", "completed"):

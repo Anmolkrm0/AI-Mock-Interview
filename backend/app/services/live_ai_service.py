@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import Conflict, RateLimited
 from app.core.rate_limit import rate_limiter
-from app.models import Document, Interview, InterviewPlan, Question
+from app.models import Document, Interview, InterviewPlan, Profile, Question
 from app.providers.base import LiveCredentials, LiveFunction, LiveInterviewProvider, LiveSessionSetup
 from app.services.interview_service import (
     LIVE_STATES,
@@ -86,6 +86,7 @@ def build_system_instruction(
     candidate: dict,
     job_title: str | None,
     remaining: int,
+    candidate_first_name: str | None = None,
 ) -> str:
     plan_lines = []
     current = None
@@ -103,15 +104,27 @@ def build_system_instruction(
             + (f" | Follow-up topics: {', '.join(q.follow_up_topics)}" if q.follow_up_topics else "")
         )
     resumed = any(q.status != "pending" for q in questions)
-    opening = (
-        "This is a reconnection to an interview already in progress. Briefly say you're back, "
-        f"then continue with question {current.sequence_number if current else 'none'}. "
-        "Do not re-introduce yourself or repeat completed questions."
-        if resumed
-        else "Start by introducing yourself in one sentence as the interviewer, explain the format "
-        "in one or two sentences (planned questions, follow-ups, they can skip, retake or type an "
-        "answer), then ask question 1."
-    )
+    if resumed:
+        opening = (
+            "This is a reconnection to an interview already in progress. Briefly say you're back, "
+            f"then continue with question {current.sequence_number if current else 'none'}. "
+            "Do not re-introduce yourself, do not repeat completed questions, and never repeat the warm greeting or ice-breaker."
+        )
+    else:
+        greeting_example = (
+            f"'Hi {candidate_first_name}, I\\'m your interviewer today.'"
+            if candidate_first_name
+            else "'Hi, I\\'m your interviewer today.'"
+        )
+        opening = (
+            "When the candidate joins, speak first, immediately. Start with one short sentence (under 10 words), "
+            f"e.g. {greeting_example} Then one sentence on the format (the role is {interview.job_role}, about {interview.duration_minutes} minutes, "
+            "and they can answer by voice or typed text), one light warm-up question ('Before we begin, how are you feeling today?'), then question 1. "
+            "Respond to their reply in one short, friendly sentence, then move to planned question 1. "
+            "Before asking question 1, call advance_to_question with next_question_number=1 and use the question text it returns. "
+            "The greeting/warm-up is not a planned question: no question_asked or answer_submitted event, never scored, and it does not start the per-question timer or over-time nudge. "
+            "Never repeat this greeting after a reconnect, session resumption, or retake."
+        )
     minutes = max(0, remaining // 60)
     return f"""You are a professional interviewer running a {interview.duration_minutes}-minute mock interview for the role "{interview.job_role}"{f" (job posting title: {job_title})" if job_title else ""}.
 
@@ -133,7 +146,7 @@ Rules:
 - If the candidate asks you to repeat or clarify, answer only what they asked, in one short sentence. For example, if they ask for the second part, say only the second part. Never re-read the whole question unless they ask for the whole question, and never repeat earlier questions.
 - Keep your own turns short: acknowledgements are 3 to 6 words. Then stop and let the candidate speak.
 - After the candidate answers, ask a follow-up only if the answer is vague, incomplete or invites a natural probe. Otherwise move on.
-- Before asking the next planned question, call advance_to_question with its number and use the question text it returns.
+- Before asking the next planned question (including question 1), call advance_to_question with its number and use the question text it returns.
 - About {minutes} minutes remain. Optional questions are only for when time allows. If time is short, prefer core questions.
 - Messages that start with "[CONTROL]" come from the interview app, not the candidate. Follow them exactly and do not read them aloud.
 - When planned questions are finished or time is up, thank the candidate in one sentence, then call end_interview.
@@ -220,6 +233,13 @@ async def issue_live_credentials(
     remaining = remaining_seconds(interview, at)
     if remaining is None:
         remaining = interview.duration_minutes * 60
+    profile = await db.get(Profile, interview.user_id)
+    candidate_first_name = None
+    if profile and profile.display_name and profile.display_name.strip():
+        candidate_first_name = profile.display_name.strip().split()[0]
+    elif resume and (resume.extracted_data or {}).get("candidate_name"):
+        candidate_first_name = str(resume.extracted_data["candidate_name"]).strip().split()[0]
+
     instruction = build_system_instruction(
         interview=interview,
         objectives=plan.plan_json.get("objectives", []),
@@ -227,6 +247,7 @@ async def issue_live_credentials(
         candidate=_compact_candidate(resume.extracted_data if resume else None),
         job_title=(job.extracted_data or {}).get("job_title") if job else None,
         remaining=remaining,
+        candidate_first_name=candidate_first_name,
     )
     interview.live_tokens_issued += 1
     interview.last_activity_at = at

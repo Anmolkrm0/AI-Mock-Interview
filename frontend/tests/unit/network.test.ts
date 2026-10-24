@@ -11,7 +11,7 @@ vi.mock("@/lib/supabase/client", () => ({
   }),
 }));
 
-import { api, ApiError } from "@/lib/api";
+import { AI_BUSY_MESSAGE, api, ApiError, errorMessage } from "@/lib/api";
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -125,5 +125,30 @@ describe("event queue", () => {
     expect(q.pending).toBe(1);
     await q.flush();
     expect(q.pending).toBe(0);
+  });
+});
+
+describe("errorMessage", () => {
+  it("maps 429 and rate limit / quota errors to AI_BUSY_MESSAGE", () => {
+    const err429 = new ApiError(429, { code: "RATE_LIMITED", message: "Too many requests", retryable: true });
+    expect(errorMessage(err429)).toBe(AI_BUSY_MESSAGE);
+
+    const errQuota = new ApiError(500, {
+      code: "AI_PROVIDER_QUOTA_EXHAUSTED",
+      message: "Quota exceeded",
+      retryable: false,
+    });
+    expect(errorMessage(errQuota)).toBe(AI_BUSY_MESSAGE);
+
+    const genericError = new Error("Resource_exhausted for model");
+    expect(errorMessage(genericError)).toBe(AI_BUSY_MESSAGE);
+  });
+
+  it("returns regular error message for other errors", () => {
+    const err = new ApiError(400, { code: "INVALID_INPUT", message: "Job description is too short", retryable: false });
+    expect(errorMessage(err)).toBe("Job description is too short");
+
+    const generic = new Error("Something broke");
+    expect(errorMessage(generic)).toBe("Something broke");
   });
 });

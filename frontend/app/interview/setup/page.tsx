@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AppHeader } from "@/components/common/app-header";
+import { PhoneNotice } from "@/components/common/phone-notice";
+import { WakingNotice } from "@/components/common/states";
 import { ChoiceGroup } from "@/components/interview/choice-group";
 import { JobReview, ResumeReview } from "@/components/interview/document-review";
 import { FileDrop } from "@/components/interview/file-drop";
@@ -53,7 +55,7 @@ function Step({
   children: React.ReactNode;
 }) {
   return (
-    <section aria-labelledby={`step-${n}`} className={cn("relative pl-12", locked && "opacity-55")}>
+    <section aria-labelledby={`step-${n}`} className={cn("relative pl-10 sm:pl-12", locked && "opacity-55")}>
       <span
         aria-hidden
         className={cn(
@@ -109,6 +111,16 @@ export default function SetupPage() {
 
   const resumeMsg = useStagedMessage(resumeBusy);
   const jdMsg = useStagedMessage(jdBusy);
+
+  const [slowStart, setSlowStart] = useState(false);
+  useEffect(() => {
+    if (startStage === "idle" && !resumeBusy && !jdBusy) {
+      setSlowStart(false);
+      return;
+    }
+    const t = setTimeout(() => setSlowStart(true), 4000);
+    return () => clearTimeout(t);
+  }, [startStage, resumeBusy, jdBusy]);
 
   // Restore parsed documents after a refresh; wake the backend early.
   useEffect(() => {
@@ -364,7 +376,7 @@ export default function SetupPage() {
                       aria-selected={jdMode === m}
                       onClick={() => setJdMode(m)}
                       className={cn(
-                        "rounded-sm px-4 py-1.5 text-sm font-medium",
+                        "min-h-[44px] rounded-sm px-4 py-1.5 text-sm font-medium",
                         jdMode === m ? "bg-ink text-white" : "text-slate hover:text-ink",
                       )}
                     >
@@ -563,11 +575,13 @@ export default function SetupPage() {
                   </p>
                 )}
               </div>
+              <PhoneNotice className="mt-4" />
             </div>
           </Step>
         </div>
 
         <div className="mt-14 space-y-4 border-t border-line pt-8">
+          {slowStart && <WakingNotice />}
           {startError && (
             <Notice
               tone="error"

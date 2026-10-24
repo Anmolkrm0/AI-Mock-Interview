@@ -4,9 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 
 const feedbackMock = vi.fn(async () => ({ rating: 4 }));
 const listMock = vi.fn();
+const retryEvaluationMock = vi.fn(async () => ({ id: "fail-1" }));
 
 vi.mock("@/services/interviews", () => ({
-  interviewsApi: { feedback: (...a: unknown[]) => feedbackMock(...(a as [])), list: () => listMock() },
+  interviewsApi: {
+    feedback: (...a: unknown[]) => feedbackMock(...(a as [])),
+    list: () => listMock(),
+    retryEvaluation: (...a: unknown[]) => retryEvaluationMock(...(a as [])),
+  },
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("next/navigation", () => ({
@@ -24,8 +29,9 @@ vi.mock("@/lib/supabase/client", () => ({
   getSupabaseBrowser: () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }),
 }));
 
+import { PhoneNotice } from "@/components/common/phone-notice";
 import { ChoiceGroup } from "@/components/interview/choice-group";
-import { Controls, Countdown, TypedAnswer } from "@/components/interview/live-parts";
+import { Controls, Countdown, InterviewerPresence, TypedAnswer } from "@/components/interview/live-parts";
 import { FeedbackForm } from "@/components/report/feedback-form";
 
 describe("ChoiceGroup (duration and rigor)", () => {
@@ -122,6 +128,18 @@ describe("live interview controls", () => {
     await waitFor(() => expect(screen.getByRole("timer")).toHaveTextContent("1:30"));
     expect(screen.getByRole("timer").className).toMatch(/text-signal/);
   });
+
+  it("displays Connecting… while connecting, Interviewer is speaking while speaking, and Start speaking when listening", () => {
+    const { rerender } = render(<InterviewerPresence speaking={false} listening={false} connecting={true} />);
+    expect(screen.getByText("Connecting…")).toBeInTheDocument();
+    expect(screen.queryByText("Start speaking")).not.toBeInTheDocument();
+
+    rerender(<InterviewerPresence speaking={true} listening={false} connecting={false} />);
+    expect(screen.getByText("Interviewer is speaking")).toBeInTheDocument();
+
+    rerender(<InterviewerPresence speaking={false} listening={true} connecting={false} />);
+    expect(screen.getByText("Start speaking")).toBeInTheDocument();
+  });
 });
 
 describe("feedback form", () => {
@@ -174,5 +192,138 @@ describe("dashboard", () => {
     expect(screen.getByText("72")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View report" })).toHaveAttribute("href", "/interview/a/report");
     expect(screen.getByText(/latest recording/i)).toBeInTheDocument();
+  });
+
+  it("shows real status reasons and working retry button when score is missing", async () => {
+    listMock.mockResolvedValue({
+      items: [
+        {
+          id: "proc-1",
+          job_role: "Frontend Dev",
+          duration_minutes: 10,
+          evaluation_rigor: "standard",
+          status: "evaluating",
+          overall_score: null,
+          report_status: "pending",
+          has_current_recording: false,
+          created_at: "2026-10-01T10:00:00Z",
+          completed_at: "2026-10-01T10:10:00Z",
+        },
+        {
+          id: "insuf-1",
+          job_role: "Backend Dev",
+          duration_minutes: 20,
+          evaluation_rigor: "standard",
+          status: "completed",
+          overall_score: null,
+          report_status: "completed",
+          evidence_sufficiency: "insufficient",
+          has_current_recording: false,
+          created_at: "2026-10-01T11:00:00Z",
+          completed_at: "2026-10-01T11:20:00Z",
+        },
+        {
+          id: "fail-1",
+          job_role: "DevOps Engineer",
+          duration_minutes: 30,
+          evaluation_rigor: "standard",
+          status: "failed",
+          failure_stage: "evaluation",
+          overall_score: null,
+          report_status: "failed",
+          has_current_recording: false,
+          created_at: "2026-10-01T12:00:00Z",
+          completed_at: "2026-10-01T12:30:00Z",
+        },
+      ],
+      total: 3,
+      limit: 50,
+      offset: 0,
+      current_recording_interview_id: null,
+    });
+    const { default: Dashboard } = await import("@/app/dashboard/page");
+    render(<Dashboard />);
+
+    expect(await screen.findByText("Report processing")).toBeInTheDocument();
+    expect(screen.getByText("Not enough answers to score")).toBeInTheDocument();
+    expect(screen.getByText(/report failed —/i)).toBeInTheDocument();
+
+    const retryBtn = screen.getByRole("button", { name: "retry" });
+    await userEvent.click(retryBtn);
+    await waitFor(() => expect(retryEvaluationMock).toHaveBeenCalledWith("fail-1"));
+  });
+});
+
+describe("PhoneNotice", () => {
+  it("renders on phone screens with coarse pointer and dismisses when clicked", async () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalMatchMedia = window.matchMedia;
+
+    try {
+      window.innerWidth = 375;
+      window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+        matches: query === "(pointer: coarse)",
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+
+      render(<PhoneNotice />);
+
+      expect(
+        screen.getByText("Interviews work best on a laptop with Chrome and headphones."),
+      ).toBeInTheDocument();
+
+      const btn = screen.getByRole("button", { name: /continue anyway/i });
+      expect(btn).toBeInTheDocument();
+
+      await userEvent.click(btn);
+
+      expect(
+        screen.queryByText("Interviews work best on a laptop with Chrome and headphones."),
+      ).not.toBeInTheDocument();
+    } finally {
+      window.innerWidth = originalInnerWidth;
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it("does not render on laptop screens (width >= 768px)", () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalMatchMedia = window.matchMedia;
+
+    try {
+      window.innerWidth = 1024;
+      window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+        matches: query === "(pointer: coarse)",
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+
+      render(<PhoneNotice />);
+      expect(
+        screen.queryByText("Interviews work best on a laptop with Chrome and headphones."),
+      ).not.toBeInTheDocument();
+    } finally {
+      window.innerWidth = originalInnerWidth;
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+});
+
+describe("setup page", () => {
+  it("defaults recording mode to audio only", async () => {
+    const { default: SetupPage } = await import("@/app/interview/setup/page");
+    render(<SetupPage />);
+    expect(screen.getByLabelText(/audio only/i)).toBeChecked();
   });
 });

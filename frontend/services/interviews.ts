@@ -57,6 +57,22 @@ export interface CreateInterviewInput {
   consent_given: boolean;
 }
 
+interface CachedLiveToken {
+  promise: Promise<LiveTokenOut>;
+  cachedAt: number;
+}
+
+const liveTokenCache = new Map<string, CachedLiveToken>();
+
+export function prefetchLiveToken(id: string): Promise<LiveTokenOut> {
+  return interviewsApi.liveToken(id);
+}
+
+export function clearLiveTokenCache(id?: string): void {
+  if (id) liveTokenCache.delete(id);
+  else liveTokenCache.clear();
+}
+
 export const interviewsApi = {
   create(input: CreateInterviewInput, idempotencyKey: string) {
     return api<InterviewOut>("/interviews", { method: "POST", body: input, idempotencyKey, retries: 2 });
@@ -77,8 +93,31 @@ export const interviewsApi = {
   status(id: string) {
     return api<StatusOut>(`/interviews/${id}/status`);
   },
-  liveToken(id: string) {
-    return api<LiveTokenOut>(`/interviews/${id}/live-token`, { method: "POST", retries: 1 });
+  liveToken(id: string, options?: { forceFresh?: boolean }): Promise<LiveTokenOut> {
+    if (!options?.forceFresh) {
+      const existing = liveTokenCache.get(id);
+      if (existing) {
+        return existing.promise
+          .then((token) => {
+            const exp = token.new_session_expires_at ? Date.parse(token.new_session_expires_at) : 0;
+            if (exp > 0 && Date.now() >= exp - 5000) {
+              liveTokenCache.delete(id);
+              return interviewsApi.liveToken(id, { forceFresh: true });
+            }
+            return token;
+          })
+          .catch((err) => {
+            liveTokenCache.delete(id);
+            throw err;
+          });
+      }
+    }
+    const promise = api<LiveTokenOut>(`/interviews/${id}/live-token`, { method: "POST", retries: 1 });
+    liveTokenCache.set(id, { promise, cachedAt: Date.now() });
+    return promise.catch((err) => {
+      liveTokenCache.delete(id);
+      throw err;
+    });
   },
   events(id: string, events: InterviewEvent[]) {
     // Events carry client ids, so retrying is safe (the backend de-duplicates).

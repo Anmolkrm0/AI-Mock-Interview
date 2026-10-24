@@ -123,6 +123,9 @@ export interface InterviewSummary {
   status: InterviewStatus;
   overall_score: number | null;
   report_status: "pending" | "completed" | "failed" | null;
+  evidence_sufficiency?: "sufficient" | "limited" | "insufficient" | null;
+  failure_stage?: string | null;
+  failure_code?: string | null;
   has_current_recording: boolean;
   created_at: string;
   completed_at: string | null;
