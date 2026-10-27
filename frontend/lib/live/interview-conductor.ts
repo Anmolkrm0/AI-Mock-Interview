@@ -32,6 +32,7 @@ export interface LiveError {
   title: string;
   message: string;
   retryable: boolean;
+  canTypeFallback?: boolean;
 }
 
 export interface Snapshot {
@@ -61,6 +62,9 @@ interface AnswerBuffer {
 }
 
 const CONTROL = "[CONTROL]";
+/** Resend the kickoff if the interviewer hasn't spoken; then give up and offer a retry. */
+const KICKOFF_RESEND_MS = 6_000;
+const KICKOFF_GIVE_UP_MS = 15_000;
 const MAX_RECONNECTS = 6;
 
 export interface ConductorDeps {
@@ -97,6 +101,9 @@ export class InterviewConductor {
   private phaseTimings: Record<string, number> = {};
   private startClickedAt: number;
   private kickoffSent = false;
+  /** True once the interviewer has produced any audio or caption in this interview. */
+  private firstOutputSeen = false;
+  private kickoffTimers: ReturnType<typeof setTimeout>[] = [];
   private isReconnectSession = false;
   private isResumedInterview = false;
   onFinished?: (reason: string) => void;
@@ -105,7 +112,9 @@ export class InterviewConductor {
     const { detail } = deps;
     this.startClickedAt = deps.startClickedAt ?? performance.now();
     this.phaseTimings["start clicked"] = this.startClickedAt;
+    this.phaseTimings["Join clicked"] = this.startClickedAt;
     console.info("[TTFR] start clicked: 0ms");
+    console.info("[TTFR] Join clicked: 0ms");
     this.queue = new EventQueue(detail.id);
     this.queue.onResult = (r) => {
       if (r.remaining_seconds !== null && r.remaining_seconds !== undefined && this.snapshot.deadlineMs === null) {
@@ -149,6 +158,10 @@ export class InterviewConductor {
     this.phaseTimings[phase] = timestamp;
     const elapsed = Math.round(timestamp - this.startClickedAt);
     console.info(`[TTFR] ${phase}: (elapsed: ${elapsed}ms)`);
+    if (phase === "live token received") this.recordPhase("token received", timestamp);
+    if (phase === "Live session connected (setupComplete)") this.recordPhase("setupComplete", timestamp);
+    if (phase === "kickoff [CONTROL] sent") this.recordPhase("kickoff sent", timestamp);
+    if (phase === "first audio chunk received") this.recordPhase("first audio chunk played", timestamp);
   }
 
   // ----------------------------------------------------------------- store API
@@ -170,7 +183,10 @@ export class InterviewConductor {
   }
 
   remainingSeconds(): number | null {
-    if (this.snapshot.deadlineMs === null) return null;
+    if (this.snapshot.deadlineMs === null) {
+      // Before the interviewer's first words the clock hasn't started: show the full length.
+      return this.startedSession ? null : this.deps.detail.duration_minutes * 60;
+    }
     return Math.max(0, Math.round((this.snapshot.deadlineMs - Date.now()) / 1000));
   }
 
@@ -319,12 +335,12 @@ export class InterviewConductor {
     await this.connect(false);
   }
 
-  private async connect(isReconnect: boolean): Promise<void> {
+  private async connect(isReconnect: boolean, forceFreshToken = false): Promise<void> {
     this.isReconnectSession = isReconnect;
     this.connectStartedAt = performance.now();
     let token: LiveTokenOut;
     try {
-      token = isReconnect
+      token = isReconnect || forceFreshToken
         ? await interviewsApi.liveToken(this.deps.detail.id, { forceFresh: true })
         : await (this.deps.token ?? interviewsApi.liveToken(this.deps.detail.id));
       this.recordPhase("live token received");
@@ -370,6 +386,7 @@ export class InterviewConductor {
           },
         },
       });
+      this.recordPhase("Live session open");
       if ((this.session as { setupComplete?: unknown } | null)?.setupComplete) {
         this.recordPhase("Live session connected (setupComplete)");
         this.maybeSendKickoff();
@@ -385,27 +402,22 @@ export class InterviewConductor {
       return;
     }
     this.reconnectAttempts = 0;
-    this.update({ phase: "live", notice: null, error: null });
+    this.update({
+      phase: "live",
+      notice: this.startedSession || this.firstOutputSeen ? null : "Your interviewer is joining…",
+      error: null,
+    });
     if (isReconnect) {
       this.emit({ event_type: "reconnected" });
       this.emit({ event_type: "resumed" });
     }
 
     const wasStarted = this.startedSession;
-    if (!this.startedSession) {
-      this.startedSession = true;
-      interviewsApi.events(this.deps.detail.id, [
-        { client_event_id: newId(), event_type: "session_started" },
-      ]).then((result) => {
-        if (result.remaining_seconds !== null) {
-          this.setDeadline(Date.now() + result.remaining_seconds * 1000, this.snapshot.clockOffsetMs);
-        }
-      }).catch(() => {
-        this.emit({ event_type: "session_started" }, true);
-      });
-    }
     const isFresh =
       !isReconnect && !wasStarted && this.questions.every((q) => q.status === "pending");
+    // A fresh interview's clock starts when the interviewer first speaks (see onFirstOutput),
+    // not when the socket opens. Anything else (resume, reconnect) starts it now.
+    if (!this.startedSession && (!isFresh || this.firstOutputSeen)) this.markStarted();
     if (!isFresh && this.snapshot.currentIndex === null) {
       this.activate(this.firstOpenIndex());
     }
@@ -419,15 +431,82 @@ export class InterviewConductor {
     const isFresh = !this.isReconnectSession && !this.isResumedInterview;
     if (isFresh && !this.kickoffSent && this.session) {
       this.kickoffSent = true;
-      this.recordPhase("kickoff sent");
+      this.recordPhase("kickoff [CONTROL] sent");
+      const kickoffText = `${CONTROL} The candidate has joined. Greet them now and begin.`;
       try {
-        this.session.sendRealtimeInput({
-          text: `${CONTROL} The candidate has joined. Greet them now and begin.`,
-        });
+        // Gemini Live: text during the conversation goes through realtime input
+        // (client content is only for seeding history at the start).
+        this.session.sendRealtimeInput({ text: kickoffText });
       } catch {
         /* ignore */
       }
+      this.watchForFirstOutput();
     }
+  }
+
+  /** If the interviewer stays silent after the kickoff, nudge once, then offer a retry. */
+  private watchForFirstOutput() {
+    this.clearKickoffTimers();
+    const waiting = () =>
+      !this.firstOutputSeen &&
+      this.snapshot.phase !== "ended" &&
+      this.snapshot.phase !== "ending" &&
+      this.snapshot.phase !== "error";
+    this.kickoffTimers.push(
+      setTimeout(() => {
+        if (waiting()) {
+          this.recordPhase("kickoff resent");
+          this.sendControl("The candidate is waiting. Greet them now and begin the interview.");
+        }
+      }, KICKOFF_RESEND_MS),
+      setTimeout(() => {
+        if (waiting()) {
+          this.fail({
+            title: "The interviewer is taking too long to join.",
+            message: "Your interview clock hasn't started. Try again to reconnect.",
+            retryable: true,
+            canTypeFallback: true,
+          });
+        }
+      }, KICKOFF_GIVE_UP_MS),
+    );
+  }
+
+  private clearKickoffTimers() {
+    for (const t of this.kickoffTimers) clearTimeout(t);
+    this.kickoffTimers = [];
+  }
+
+  /** Tell the backend the interview has started; it sets started_at and the deadline. */
+  private markStarted() {
+    if (this.startedSession) return;
+    this.startedSession = true;
+    interviewsApi
+      .events(this.deps.detail.id, [{ client_event_id: newId(), event_type: "session_started" }])
+      .then((result) => {
+        if (result.remaining_seconds !== null && result.remaining_seconds !== undefined) {
+          this.setDeadline(Date.now() + result.remaining_seconds * 1000, this.snapshot.clockOffsetMs);
+        }
+      })
+      .catch(() => {
+        this.emit({ event_type: "session_started" }, true);
+      });
+  }
+
+  /** The interviewer has produced its first audio or caption: start the clock. */
+  private onFirstOutput() {
+    if (this.firstOutputSeen) return;
+    this.firstOutputSeen = true;
+    this.recordPhase("first model message");
+    this.clearKickoffTimers();
+    this.update({ hasGreetingStarted: true, notice: null });
+    if (this.snapshot.deadlineMs === null) {
+      this.setDeadline(
+        Date.now() + this.deps.detail.duration_minutes * 60 * 1000,
+        this.snapshot.clockOffsetMs,
+      );
+    }
+    this.markStarted();
   }
 
   private handleConnectFailure(isReconnect: boolean, error: unknown) {
@@ -449,6 +528,7 @@ export class InterviewConductor {
 
   private onClose(e: CloseEvent) {
     this.session = null;
+    this.clearKickoffTimers();
     if (this.closingIntentionally || this.snapshot.phase === "ending" || this.snapshot.phase === "ended") return;
     this.player.clear();
     this.finalizePartials();
@@ -488,6 +568,46 @@ export class InterviewConductor {
   async retry() {
     this.reconnectAttempts = 0;
     this.update({ error: null });
+    if (!this.startedSession && !this.firstOutputSeen && !this.isResumedInterview && this.session) {
+      // The interviewer never replied: drop this session and start again, still as a fresh interview.
+      const old = this.session;
+      this.generation += 1;
+      this.session = null;
+      try {
+        old.close();
+      } catch {
+        /* already closed */
+      }
+      this.kickoffSent = false;
+      this.update({ phase: "connecting", notice: "Connecting to your interviewer…" });
+      await this.connect(false, true);
+      return;
+    }
+    if (!this.capture) await this.start();
+    else await this.connect(true);
+  }
+
+  async continueByTyping() {
+    this.reconnectAttempts = 0;
+    this.update({ error: null, inputMode: "text" });
+    if (this.capture) {
+      this.capture.stop();
+      this.capture = null;
+    }
+    if (!this.startedSession && !this.firstOutputSeen && !this.isResumedInterview && this.session) {
+      const old = this.session;
+      this.generation += 1;
+      this.session = null;
+      try {
+        old.close();
+      } catch {
+        /* already closed */
+      }
+      this.kickoffSent = false;
+      this.update({ phase: "connecting", notice: "Connecting to your interviewer…" });
+      await this.connect(false, true);
+      return;
+    }
     if (!this.capture) await this.start();
     else await this.connect(true);
   }
@@ -511,8 +631,9 @@ export class InterviewConductor {
   private sendAudio(base64Pcm: string) {
     if (!this.session || this.snapshot.phase !== "live") return;
     if (this.snapshot.inputMode === "text") return;
-    // Don't send mic audio before the interviewer has started speaking the greeting so the candidate doesn't talk over it
-    if (!this.snapshot.hasGreetingStarted) return;
+    // Don't send mic audio before the interviewer has started speaking the greeting
+    // so Gemini Live's VAD doesn't interpret candidate audio/noise as user input and wait for them.
+    if (!this.snapshot.hasGreetingStarted && !this.isResumedInterview) return;
     // Without headphones the mic hears the interviewer; pause the mic while it speaks
     // so it doesn't interrupt itself.
     if (!this.snapshot.headphones && this.player.isPlaying) return;
@@ -524,8 +645,9 @@ export class InterviewConductor {
   }
 
   private sendControl(instruction: string) {
+    const text = `${CONTROL} ${instruction}`;
     try {
-      this.session?.sendRealtimeInput({ text: `${CONTROL} ${instruction}` });
+      this.session?.sendRealtimeInput({ text });
     } catch {
       /* ignore while reconnecting */
     }
@@ -576,6 +698,7 @@ export class InterviewConductor {
     }
     const parts = content.modelTurn?.parts ?? [];
     const hasModelOutput = parts.some((p) => p.inlineData?.data) || Boolean(content.outputTranscription?.text);
+    if (hasModelOutput) this.onFirstOutput();
     if (hasModelOutput && this.candidatePartial.trim()) {
       if (this.buffer) this.buffer.voiced = true;
       this.addLine("candidate", this.candidatePartial);
@@ -588,7 +711,6 @@ export class InterviewConductor {
           this.firstAudioReported = true;
           this.recordPhase("first audio chunk received");
           this.recordPhase("first audio played");
-          this.update({ hasGreetingStarted: true, notice: null });
           const totalMs = Math.round(performance.now() - this.startClickedAt);
           this.emit({
             event_type: "metric",
@@ -779,6 +901,7 @@ export class InterviewConductor {
 
   /** End the interview. Idempotent: safe to call from several places. */
   finish(reason: "user_ended" | "time_expired" | "all_questions_done"): Promise<void> {
+    this.clearKickoffTimers();
     if (this.finishing) return this.finishing;
     this.finishing = (async () => {
       this.update({ phase: "ending", notice: "Saving your interview…" });

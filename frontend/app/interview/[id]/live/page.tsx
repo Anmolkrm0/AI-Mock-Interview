@@ -571,7 +571,7 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3 sm:px-8">
           <div className="min-w-0">
             <p className="truncate font-display text-lg font-semibold">{detail.job_role}</p>
-            <ConnectionStatus phase={snap.phase} />
+            <ConnectionStatus phase={snap.phase} ready={snap.hasGreetingStarted || resumed} />
           </div>
           <div className="flex items-center gap-5">
             <Countdown getRemaining={getRemaining} />
@@ -599,8 +599,20 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
                 snap.error.retryable ? (
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" onClick={() => void conductor?.retry()}>
-                      Reconnect
+                      {snap.error.title.includes("taking too long") ? "Try again" : "Reconnect"}
                     </Button>
+                    {snap.error.canTypeFallback && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => {
+                          setTypedFallbackActive(true);
+                          void conductor?.continueByTyping();
+                        }}
+                      >
+                        Continue by typing
+                      </Button>
+                    )}
                     <Button size="sm" variant="secondary" onClick={() => setConfirmEnd(true)}>
                       End and get report
                     </Button>
@@ -638,7 +650,11 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
                 }
               />
             </div>
-            <QuestionPanel questions={snap.questions} currentIndex={snap.currentIndex} />
+            <QuestionPanel
+              questions={snap.questions}
+              currentIndex={snap.currentIndex}
+              isConnecting={!snap.hasGreetingStarted && !resumed}
+            />
           </div>
 
           <div className="space-y-4">

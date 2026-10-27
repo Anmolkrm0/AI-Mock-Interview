@@ -8,6 +8,7 @@ export interface FakeCallbacks {
 
 export class FakeSession {
   realtime: { audio?: unknown; text?: string; audioStreamEnd?: boolean }[] = [];
+  clientContent: { turns?: unknown; turnComplete?: boolean }[] = [];
   toolResponses: unknown[] = [];
   closed = false;
   constructor(
@@ -16,6 +17,9 @@ export class FakeSession {
   ) {}
   sendRealtimeInput(p: { audio?: unknown; text?: string; audioStreamEnd?: boolean }) {
     this.realtime.push(p);
+  }
+  sendClientContent(p: { turns?: unknown; turnComplete?: boolean }) {
+    this.clientContent.push(p);
   }
   sendToolResponse(p: unknown) {
     this.toolResponses.push(p);
@@ -31,7 +35,19 @@ export class FakeSession {
     this.callbacks.onclose?.({ code, reason: "network" });
   }
   get texts() {
-    return this.realtime.filter((r) => r.text).map((r) => r.text!);
+    const rt = this.realtime.filter((r) => r.text).map((r) => r.text!);
+    const cc = this.clientContent.flatMap((c) => {
+      if (Array.isArray(c.turns)) {
+        return c.turns.flatMap((t: unknown) => {
+          const turn = t as { parts?: { text?: string }[] };
+          return Array.isArray(turn?.parts)
+            ? turn.parts.map((p) => p?.text).filter((x): x is string => Boolean(x))
+            : [];
+        });
+      }
+      return [];
+    });
+    return [...rt, ...cc];
   }
 }
 

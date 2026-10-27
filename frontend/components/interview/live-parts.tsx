@@ -29,11 +29,15 @@ export function Countdown({ getRemaining }: { getRemaining: () => number | null 
   );
 }
 
-export function ConnectionStatus({ phase }: { phase: Phase }) {
+export function ConnectionStatus({ phase, ready = true }: { phase: Phase; ready?: boolean }) {
   const map: Record<Phase, { label: string; tone: string; icon: typeof Wifi }> = {
     idle: { label: "Not connected", tone: "text-slate", icon: WifiOff },
-    connecting: { label: "Connecting", tone: "text-wait", icon: Wifi },
-    live: { label: "Connected", tone: "text-go", icon: Wifi },
+    connecting: { label: "Connecting to your interviewer…", tone: "text-wait", icon: Wifi },
+    live: {
+      label: ready ? "Connected" : "Connecting to your interviewer…",
+      tone: ready ? "text-go" : "text-wait",
+      icon: Wifi,
+    },
     reconnecting: { label: "Reconnecting", tone: "text-wait", icon: WifiOff },
     ending: { label: "Saving", tone: "text-slate", icon: Wifi },
     ended: { label: "Ended", tone: "text-slate", icon: WifiOff },
@@ -102,10 +106,19 @@ export function MicMeter({ level, muted }: { level: number; muted: boolean }) {
   );
 }
 
-export function QuestionPanel({ questions, currentIndex }: { questions: QuestionOut[]; currentIndex: number | null }) {
+export function QuestionPanel({
+  questions,
+  currentIndex,
+  isConnecting = false,
+}: {
+  questions: QuestionOut[];
+  currentIndex: number | null;
+  isConnecting?: boolean;
+}) {
   const done = questions.filter((q) => q.status === "answered" || q.status === "skipped").length;
   const core = questions.filter((q) => q.priority === "core").length || questions.length;
   const current = currentIndex !== null ? questions[currentIndex] : undefined;
+  const connecting = isConnecting || (!current && done === 0);
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4 text-sm text-slate">
@@ -114,13 +127,19 @@ export function QuestionPanel({ questions, currentIndex }: { questions: Question
             ? current.priority === "optional"
               ? "Bonus question"
               : `Question ${current.sequence_number} of ${core}`
-            : "Between questions"}
+            : connecting
+              ? "Connecting…"
+              : "Between questions"}
         </span>
         <span>{done} done</span>
       </div>
       <ProgressBar value={(Math.min(done, core) / core) * 100} label="Interview progress" />
       <p className="font-display text-2xl font-semibold leading-snug sm:text-[1.75rem]" aria-live="polite">
-        {current ? current.question_text : "The interviewer will continue shortly."}
+        {current
+          ? current.question_text
+          : connecting
+            ? "Connecting to your interviewer… Please wait."
+            : "The interviewer will continue shortly."}
       </p>
       {current && (
         <p className="text-sm text-slate">

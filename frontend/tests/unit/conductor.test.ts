@@ -65,8 +65,9 @@ describe("InterviewConductor", () => {
     await c.start();
     const s1 = live.sessions[0]!;
     expect(c.getSnapshot().phase).toBe("live");
-    expect(eventsOf("session_started")).toHaveLength(1);
-    expect(c.remainingSeconds()).toBeGreaterThan(1190);
+    // The clock waits for the interviewer's first words.
+    expect(eventsOf("session_started")).toHaveLength(0);
+    expect(c.remainingSeconds()).toBe(1200);
     expect(c.getSnapshot().currentIndex).toBeNull();
 
     // Advance to Question 1 after warm-up
@@ -78,6 +79,7 @@ describe("InterviewConductor", () => {
     // Interviewer asks Q1, candidate answers by voice.
     s1.emit({ serverContent: { outputTranscription: { text: "Tell me about question one?" } } });
     s1.emit({ serverContent: { turnComplete: true } });
+    expect(eventsOf("session_started")).toHaveLength(1);
     s1.emit({ serverContent: { inputTranscription: { text: "I built a payments API " } } });
     s1.emit({ serverContent: { inputTranscription: { text: "with Redis caching." } } });
     s1.emit({ serverContent: { outputTranscription: { text: "Thanks." } } });
@@ -354,6 +356,119 @@ describe("InterviewConductor", () => {
     const transcript = c.getSnapshot().transcript;
     const interviewerLines = transcript.filter((t) => t.speaker === "interviewer");
     expect(interviewerLines[0]?.text).toBe("Can you describe a challenging bug?");
+  });
+  it("starts the interview clock only when the interviewer first speaks", async () => {
+    const c = new InterviewConductor({ detail: detail(), ctx: {} as AudioContext, mic: {} as MediaStream });
+    await c.start();
+    const s = live.sessions[0]!;
+    // Kickoff is sent after setupComplete, not before
+    expect(s.texts).not.toContain("[CONTROL] The candidate has joined. Greet them now and begin.");
+    s.emit({ setupComplete: {} });
+    expect(s.texts).toContain("[CONTROL] The candidate has joined. Greet them now and begin.");
+    // Connected, kickoff sent, but no words yet: the clock shows the full length and hasn't started.
+    expect(eventsOf("session_started")).toHaveLength(0);
+    expect(c.remainingSeconds()).toBe(1200);
+    expect(c.getSnapshot().hasGreetingStarted).toBe(false);
+
+    s.emit({ serverContent: { modelTurn: { parts: [{ inlineData: { data: "AAAA", mimeType: "audio/pcm;rate=24000" } }] } } });
+    expect(eventsOf("session_started")).toHaveLength(1);
+    expect(c.getSnapshot().hasGreetingStarted).toBe(true);
+
+    // More audio doesn't start it twice.
+    s.emit({ serverContent: { modelTurn: { parts: [{ inlineData: { data: "AAAA", mimeType: "audio/pcm;rate=24000" } }] } } });
+    s.emit({ serverContent: { outputTranscription: { text: "Hi, welcome." } } });
+    expect(eventsOf("session_started")).toHaveLength(1);
+    await c.finish("user_ended");
+  });
+
+  it("starts the clock when output transcription arrives first", async () => {
+    const c = new InterviewConductor({ detail: detail(), ctx: {} as AudioContext, mic: {} as MediaStream });
+    await c.start();
+    const s = live.sessions[0]!;
+    s.emit({ setupComplete: {} });
+    expect(eventsOf("session_started")).toHaveLength(0);
+    expect(c.remainingSeconds()).toBe(1200);
+    s.emit({ serverContent: { outputTranscription: { text: "Welcome to the interview." } } });
+    expect(eventsOf("session_started")).toHaveLength(1);
+    expect(c.getSnapshot().hasGreetingStarted).toBe(true);
+    await c.finish("user_ended");
+  });
+
+  it("nudges a silent interviewer, then offers a retry that reconnects as a fresh interview", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const c = new InterviewConductor({ detail: detail(), ctx: {} as AudioContext, mic: {} as MediaStream });
+    await c.start();
+    const s1 = live.sessions[0]!;
+    s1.emit({ setupComplete: {} });
+
+    await vi.advanceTimersByTimeAsync(6_100);
+    expect(s1.texts.at(-1)).toMatch(/\[CONTROL\] The candidate is waiting/);
+    expect(c.getSnapshot().phase).toBe("live");
+
+    await vi.advanceTimersByTimeAsync(9_100);
+    expect(c.getSnapshot().phase).toBe("error");
+    expect(c.getSnapshot().error?.title).toBe("The interviewer is taking too long to join.");
+    expect(c.getSnapshot().error?.retryable).toBe(true);
+    expect(c.getSnapshot().error?.canTypeFallback).toBe(true);
+    expect(eventsOf("session_started")).toHaveLength(0);
+
+    await c.retry();
+    const s2 = live.sessions[1]!;
+    expect(s1.closed).toBe(true);
+    expect(live.tokens).toBe(2);
+    s2.emit({ setupComplete: {} });
+    expect(s2.texts).toContain("[CONTROL] The candidate has joined. Greet them now and begin.");
+    s2.emit({ serverContent: { outputTranscription: { text: "Hello!" } } });
+    expect(eventsOf("session_started")).toHaveLength(1);
+    expect(c.getSnapshot().phase).toBe("live");
+    await c.finish("user_ended");
+    vi.useRealTimers();
+  });
+
+  it("allows switching to typed fallback after timeout", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const c = new InterviewConductor({ detail: detail(), ctx: {} as AudioContext, mic: {} as MediaStream });
+    await c.start();
+    const s1 = live.sessions[0]!;
+    s1.emit({ setupComplete: {} });
+
+    await vi.advanceTimersByTimeAsync(15_200);
+    expect(c.getSnapshot().phase).toBe("error");
+    expect(c.getSnapshot().error?.canTypeFallback).toBe(true);
+
+    await c.continueByTyping();
+    expect(c.getSnapshot().inputMode).toBe("text");
+    const s2 = live.sessions[1]!;
+    expect(s1.closed).toBe(true);
+    s2.emit({ setupComplete: {} });
+    expect(s2.texts).toContain("[CONTROL] The candidate has joined. Greet them now and begin.");
+    s2.emit({ serverContent: { outputTranscription: { text: "Hello! We'll do this interview via text." } } });
+    expect(eventsOf("session_started")).toHaveLength(1);
+    expect(c.getSnapshot().phase).toBe("live");
+    await c.finish("user_ended");
+    vi.useRealTimers();
+  });
+
+  it("preserves deadline on reconnect when interview has an existing started_at", async () => {
+    const pastStarted = new Date(Date.now() - 300_000).toISOString();
+    const existingDeadline = new Date(Date.now() + 900_000).toISOString();
+    const resumedDetail = detail();
+    resumedDetail.started_at = pastStarted;
+    resumedDetail.deadline_at = existingDeadline;
+
+    const c = new InterviewConductor({ detail: resumedDetail, ctx: {} as AudioContext, mic: {} as MediaStream });
+    expect(c.remainingSeconds()).toBeLessThanOrEqual(900);
+    expect(c.remainingSeconds()).toBeGreaterThan(890);
+    expect(c.getSnapshot().hasGreetingStarted).toBe(true);
+
+    await c.start();
+    const s = live.sessions[0]!;
+    s.emit({ setupComplete: {} });
+    // Reconnect/resume does not send kickoff and does not re-send session_started
+    expect(s.texts).not.toContain("[CONTROL] The candidate has joined. Greet them now and begin.");
+    expect(eventsOf("session_started")).toHaveLength(0);
+    expect(c.remainingSeconds()).toBeLessThanOrEqual(900);
+    await c.finish("user_ended");
   });
 });
 
