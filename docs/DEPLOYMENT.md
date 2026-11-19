@@ -1,10 +1,17 @@
-# Deployment (Render + Supabase)
+# Deployment (Netlify + Render + Supabase)
+
+Host the Next.js frontend on Netlify's free plan, keep the FastAPI backend on Render's free plan, and store data in Supabase (free tier). Total server cost: **₹0 / month**.
+
+---
 
 ## 0. Before you start
 
 - `./scripts/verify.sh` passes on your Mac.
-- `frontend/package-lock.json` exists and is committed (`setup-mac.sh` creates it). Render's `npm ci` fails without it.
-- No `.env` files are committed (`git status` should not show them; `.gitignore` excludes them).
+- `frontend/package-lock.json` exists and is committed (`setup-mac.sh` creates it).
+- No `.env` or `.env.local` files are committed (`.gitignore` excludes them).
+- `netlify.toml` is present at the repository root.
+
+---
 
 ## 1. Push to GitHub
 
@@ -13,63 +20,129 @@ git remote add origin https://github.com/<you>/ai-mock-interview.git
 git push -u origin main
 ```
 
+---
+
 ## 2. Production Supabase
 
-You can reuse your development project for a small beta, but a separate production project keeps test data out. For the production project, repeat README step 1 and then:
+You can reuse your development project for a small beta, or create a separate production project at [supabase.com](https://supabase.com).
+
+Run the migrations once against production:
 
 ```bash
 ./scripts/migrate.sh "postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres"
 ```
 
-This creates the tables, RLS policies and the private `interview-recordings` / `interview-documents` buckets. Re-run it after any future schema change, **before** deploying the new backend.
+This creates tables, Row Level Security policies, and the private `interview-recordings` and `interview-documents` storage buckets.
 
-Auth settings (Authentication → URL Configuration), after step 3 gives you URLs:
-- Site URL: `https://<frontend>.onrender.com`
-- Redirect URLs: `https://<frontend>.onrender.com/auth/callback`
+Auth settings (**Authentication → URL Configuration**):
+- **Site URL:** `https://<netlify-site>`
+- **Redirect URLs:** add `https://<netlify-site>/auth/callback` (and `http://localhost:3000/auth/callback` for local development).
 
-Optional but recommended for real users: Authentication → Emails → set up custom SMTP. Supabase's built-in email sender has a low hourly limit meant for testing.
+---
 
-## 3. Render Blueprint
+## 3. Backend on Render (free tier)
 
-Render → **New → Blueprint** → choose the repo. `render.yaml` defines:
+Deploy the FastAPI service on Render as a free Web Service (or via `render.yaml` Blueprint):
 
-| Service | Root | Build | Start | Health check |
-|---|---|---|---|---|
-| `ai-mock-interview-api` | `backend` | `pip install -r requirements.txt` | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` | `/api/v1/ready` |
-| `ai-mock-interview-web` | `frontend` | `npm ci && npm run build` | `npm start` (binds `$PORT`) | `/` |
+| Field | Value |
+|---|---|
+| **Name** | `ai-mock-interview-api` |
+| **Runtime** | `Python` |
+| **Root Directory** | `backend` |
+| **Build Command** | `pip install -r requirements.txt` |
+| **Start Command** | `uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"` |
+| **Health Check Path** | `/api/v1/ready` |
 
-Fill in the values Render asks for:
+**Environment variables:**
+- `DATABASE_URL` — production Session pooler URI (`postgresql://...:5432/postgres`)
+- `SUPABASE_URL` — `https://<ref>.supabase.co`
+- `SUPABASE_SECRET_KEY` — `sb_secret_...`
+- `SUPABASE_JWT_SECRET` — only for legacy-secret projects
+- `GEMINI_API_KEY` — Google Gemini API key
+- `GEMINI_TEXT_MODEL` — `gemini-3.5-flash-lite`
+- `GEMINI_EVALUATION_MODEL` — `gemini-3.5-flash-lite`
+- `GEMINI_LIVE_MODEL` — `gemini-3.8-live`
+- `GEMINI_LIVE_API_VERSION` — `v1alpha`
+- `CORS_ORIGINS` — `https://<netlify-site>,https://<frontend>.onrender.com` (comma-separated if transitioning; no trailing slash)
+- `ADMIN_EMAILS` — comma-separated admin emails allowed to access `/admin` dashboard (must be email-verified)
+- `DAILY_INTERVIEW_LIMIT` — `5`
+- `RUN_WORKER` — `true`
 
-**Backend**
-- `DATABASE_URL` — production Session pooler URI
-- `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (and `SUPABASE_JWT_SECRET` only for legacy-secret projects)
-- `GEMINI_API_KEY`
-- `CORS_ORIGINS` — `https://<frontend>.onrender.com` (exact, no trailing slash)
-- `ADMIN_EMAILS` — comma-separated admin emails allowed to access `/admin` dashboard and `/admin/feedback` (empty = no admins; email must be verified in Supabase)
-
-**Frontend**
-- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `NEXT_PUBLIC_API_URL` — `https://<backend>.onrender.com`
-
-`NEXT_PUBLIC_*` values are baked into the build: after changing one, trigger **Manual Deploy → Clear build cache & deploy**.
-
-The backend's `/api/v1/ready` returns 503 until the database is reachable and migrations are current, so Render won't send traffic to a backend whose schema is out of date. Nothing is created or dropped automatically at startup.
-
-## 4. Verify the deployment
-
-```bash
-curl https://<backend>.onrender.com/api/v1/health
+### Keep-awake pinger (₹0 cost)
+Render's free tier spins down services after 15 minutes of idle time. Set up a free external uptime monitor (such as [cron-job.org](https://cron-job.org) or [UptimeRobot](https://uptimerobot.com)) to ping:
 ```
+GET https://<backend>.onrender.com/api/v1/health
+```
+every 10–14 minutes. This keeps the backend warm so candidates receive an immediate greeting without waiting for a cold start.
 
-Expect `"database": {"status": "ok", "up_to_date": true}` and every provider `"configured": true`. Then run the manual checklist in [TESTING.md](TESTING.md#manual-release-checklist) on the live URL, including one full interview and the recording replacement check.
+---
 
-## Free-tier behaviour
+## 4. Frontend on Netlify (free tier)
 
-- **Render free:** each service spins down after 15 minutes without traffic and takes about a minute to wake. The 750 free instance-hours per month are shared across your workspace, and this app runs two services, so if both stayed awake around the clock they'd run out mid-month. Normal beta traffic with idle periods stays well under. If you need always-on, upgrade the backend first.
-- **Render filesystem is ephemeral.** Nothing is stored on it; all data is in Supabase.
-- **Supabase free:** 500 MB database, 1 GB file storage, 50 MB per file, 5 GB egress; the project pauses after 7 days without activity (restore it from the dashboard). Recordings are budgeted to stay under 50 MB, and only each user's latest recording is kept, so 1 GB covers a few dozen active users. For more, use Supabase Pro (larger files, 100 GB storage).
-- **Gemini free tier:** daily per-project limits. When exhausted, users see "The AI service's free quota is used up for now" and can retry after the daily reset (midnight Pacific time). `DAILY_INTERVIEW_LIMIT` (default 5 per user per 24 h) protects the shared quota.
+1. Log in to [netlify.com](https://netlify.com) and click **Add new site → Import an existing project**.
+2. Select your GitHub repository.
+3. The included `netlify.toml` automatically configures:
+   - **Base directory:** `frontend`
+   - **Build command:** `npm run build`
+   - **Publish directory:** `.next`
+   - **Node version:** `22` (via `[build.environment] NODE_VERSION = "22"`)
+   Netlify's Next.js runtime is detected automatically; do not add a custom server.
+4. In **Site configuration → Environment variables**, add the 4 public configuration variables:
+   - `NEXT_PUBLIC_SUPABASE_URL` — `https://<ref>.supabase.co`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — `sb_publishable_...` (or legacy anon key)
+   - `NEXT_PUBLIC_API_URL` — `https://<backend>.onrender.com` (your live Render backend URL, no trailing slash)
+   - `NEXT_PUBLIC_RECORDING_MAX_BYTES` — `52428800`
+5. Click **Deploy site**. Once built, your site will be live at `https://<netlify-site>`.
 
-## Rollback
+---
 
-Render keeps previous deploys: Service → Events → pick a deploy → **Rollback**. Migrations are additive; if a migration must be undone, `cd backend && .venv/bin/alembic downgrade -1` against the target database.
+## 5. Legacy Render frontend redirect (transition)
+
+If you previously hosted the frontend on Render (`ai-mock-interview-web`):
+
+1. In the Render Dashboard, go to your old `ai-mock-interview-web` service → **Environment**.
+2. Add environment variable:
+   ```ini
+   LEGACY_REDIRECT_TO=https://<netlify-site>
+   ```
+3. `frontend/proxy.ts` checks `LEGACY_REDIRECT_TO` on every incoming request. If set to a valid `https:` URL, it returns an immediate `308 Permanent Redirect` to the new Netlify origin, preserving the exact path and query string.
+4. **Important:** Set `LEGACY_REDIRECT_TO` *only* on the old Render frontend service. Never set it on Netlify itself.
+
+---
+
+## 6. Verify the deployment
+
+1. **Backend health check:**
+   ```bash
+   curl https://<backend>.onrender.com/api/v1/health
+   ```
+   Expect `"database": {"status": "ok", "up_to_date": true}` and every provider `"configured": true`.
+
+2. **Frontend check:**
+   Open `https://<netlify-site>` in Chrome or Safari. Log in, upload a resume and job description, and start a practice interview.
+
+3. **Legacy redirect check (if transitioning from Render):**
+   ```bash
+   curl -sI https://<old-frontend>.onrender.com/interview/setup?role=swe
+   ```
+   Expect `HTTP/2 308` with `location: https://<netlify-site>/interview/setup?role=swe`.
+
+4. Follow the manual checklist in [docs/TESTING.md](TESTING.md#manual-release-checklist).
+
+---
+
+## 7. Free-tier behaviour & ₹0 cost guarantee
+
+- **Netlify free tier:** Generous free bandwidth and build minutes, global CDN edge, zero cold starts for static assets and server components.
+- **Render free tier:** Backend API service runs at ₹0. The keep-awake pinger on `/api/v1/health` keeps the service responsive.
+- **Supabase free tier:** 500 MB database, 1 GB file storage, 50 MB per file, 5 GB egress.
+- **Gemini free tier:** Daily quota per project; `DAILY_INTERVIEW_LIMIT` (default 5 per user per day) prevents quota exhaustion.
+- **Total server cost:** ₹0 / $0 per month.
+
+---
+
+## 8. Rollback
+
+- **Netlify:** Site configuration → **Deploys** → select previous deploy → **Publish deploy**.
+- **Render:** Service → **Events** → select previous deploy → **Rollback**.
+- Migrations are additive; if a migration must be undone: `cd backend && .venv/bin/alembic downgrade -1`.
