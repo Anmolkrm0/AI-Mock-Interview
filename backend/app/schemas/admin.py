@@ -34,6 +34,8 @@ class OverviewInterviewsOut(BaseModel):
     completion_rate: float
     guest_interviews: int = 0
     registered_interviews: int = 0
+    guest_interviews_today: int = 0
+    guest_daily_cap: int = 20
 
 
 class OverviewAveragesOut(BaseModel):

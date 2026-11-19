@@ -47,6 +47,7 @@ os.environ.update(
         "RUN_WORKER": "false",
         "AI_MAX_RETRIES": "2",
         "CORS_ORIGINS": "http://localhost:3000",
+        "ALLOW_VIDEO_RECORDING": "true",
     }
 )
 

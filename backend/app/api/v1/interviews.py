@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Header, Query, Response
+from fastapi import APIRouter, Header, Query, Request, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 
@@ -54,12 +54,19 @@ async def create_interview(
     settings: SettingsDep,
     providers: Providers,
     response: Response,
+    request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=128),
 ) -> InterviewOut:
     if not providers.live.is_configured() or not providers.text.is_configured():
         from app.providers.base import not_configured
 
         raise not_configured("The AI provider", "GEMINI_API_KEY")
+    x_forwarded_for = request.headers.get("x-forwarded-for", "")
+    client_ip = (
+        x_forwarded_for.split(",")[0].strip()
+        if x_forwarded_for
+        else (request.client.host if request.client else "unknown")
+    )
     interview, created = await interview_service.create_interview(
         db,
         user_id=user.id,
@@ -67,6 +74,7 @@ async def create_interview(
         idempotency_key=idempotency_key,
         settings=settings,
         is_anonymous=user.is_anonymous,
+        client_ip=client_ip,
     )
     if not created:
         response.status_code = 200

@@ -25,11 +25,17 @@ vi.mock("next/link", () => ({
     </a>
   ),
 }));
+import type { Session, User } from "@supabase/supabase-js";
+
+const mockGetSession = vi.fn(
+  async (): Promise<{ data: { session: Session | null } }> => ({ data: { session: null } }),
+);
+
 vi.mock("@/lib/supabase/client", () => ({
   getSupabaseBrowser: () => ({
     auth: {
       getUser: async () => ({ data: { user: null } }),
-      getSession: async () => ({ data: { session: null } }),
+      getSession: () => mockGetSession(),
     },
   }),
 }));
@@ -327,10 +333,38 @@ describe("PhoneNotice", () => {
 });
 
 describe("setup page", () => {
-  it("defaults recording mode to audio only", async () => {
+  it("defaults recording mode to none", async () => {
     const { default: SetupPage } = await import("@/app/interview/setup/page");
     render(<SetupPage />);
-    expect(screen.getByLabelText(/audio only/i)).toBeChecked();
+    expect(screen.getByLabelText(/don't record/i)).toBeChecked();
+  });
+
+  it("hides video recording option when allowVideoRecording is not true", async () => {
+    const { default: SetupPage } = await import("@/app/interview/setup/page");
+    render(<SetupPage />);
+    expect(screen.queryByLabelText(/video and audio/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/audio only/i)).toBeInTheDocument();
+  });
+});
+
+describe("AppHeader guest menu", () => {
+  it("shows 'Create free account' and hides Interviews, Settings, Sign out for anonymous guests", async () => {
+    mockGetSession.mockResolvedValueOnce({
+      data: {
+        session: {
+          user: { is_anonymous: true } as unknown as User,
+          access_token: "tok",
+        } as unknown as Session,
+      },
+    });
+
+    const { AppHeader } = await import("@/components/common/app-header");
+    render(<AppHeader />);
+
+    expect(await screen.findByRole("link", { name: /create free account/i })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Interviews" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /sign out/i })).not.toBeInTheDocument();
   });
 });
 

@@ -140,6 +140,7 @@ class Interview(Base):
     is_guest: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    guest_ip_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="created")
     failure_stage: Mapped[str | None] = mapped_column(String(32))
     failure_code: Mapped[str | None] = mapped_column(String(64))

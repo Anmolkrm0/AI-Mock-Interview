@@ -7,6 +7,10 @@ export const env = {
   supabaseKey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "",
   apiUrl: (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/+$/, ""),
   recordingMaxBytes: Number(process.env.NEXT_PUBLIC_RECORDING_MAX_BYTES ?? 52428800),
+  allowVideoRecording:
+    process.env.NEXT_PUBLIC_ALLOW_VIDEO_RECORDING === "true" ||
+    process.env.ALLOW_VIDEO_RECORDING === "true",
+  turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "",
 };
 
 export function missingConfig(): string[] {

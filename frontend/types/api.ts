@@ -335,6 +335,8 @@ export interface OverviewInterviewsOut {
   completion_rate: number;
   guest_interviews?: number;
   registered_interviews?: number;
+  guest_interviews_today?: number;
+  guest_daily_cap?: number;
 }
 
 export interface OverviewAveragesOut {

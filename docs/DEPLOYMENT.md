@@ -67,6 +67,10 @@ Deploy the FastAPI service on Render as a free Web Service (or via `render.yaml`
 - `ADMIN_EMAILS` — comma-separated admin emails allowed to access `/admin` dashboard (must be email-verified)
 - `DAILY_INTERVIEW_LIMIT` — `5`
 - `RUN_WORKER` — `true`
+- `GUEST_IP_SALT` — secret salt for client IP hashing (`GUEST_IP_SALT=secret_salt`)
+- `GUEST_PER_NETWORK_DAILY` — max guest interviews per network in 24 hours (default `2`)
+- `GUEST_DAILY_CAP` — max guest interviews per day since 00:00 Asia/Kolkata (default `20`)
+- `ALLOW_VIDEO_RECORDING` — `false` to disable video recording and protect free storage
 
 ### Keep-awake pinger (₹0 cost)
 Render's free tier spins down services after 15 minutes of idle time. Set up a free external uptime monitor (such as [cron-job.org](https://cron-job.org) or [UptimeRobot](https://uptimerobot.com)) to ping:
@@ -92,6 +96,8 @@ every 10–14 minutes. This keeps the backend warm so candidates receive an imme
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — `sb_publishable_...` (or legacy anon key)
    - `NEXT_PUBLIC_API_URL` — `https://<backend>.onrender.com` (your live Render backend URL, no trailing slash)
    - `NEXT_PUBLIC_RECORDING_MAX_BYTES` — `52428800`
+   - `NEXT_PUBLIC_ALLOW_VIDEO_RECORDING` — `false` (optional, defaults to false)
+   - `NEXT_PUBLIC_TURNSTILE_SITE_KEY` — optional Cloudflare Turnstile site key for bot verification
 5. Click **Deploy site**. Once built, your site will be live at `https://<netlify-site>`.
 
 ---

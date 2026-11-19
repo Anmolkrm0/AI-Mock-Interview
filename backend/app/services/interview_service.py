@@ -12,8 +12,10 @@ Attempt-selection policy (used by evaluation):
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -98,6 +100,13 @@ def remaining_seconds(interview: Interview, at: datetime | None = None) -> int |
 # ---------------------------------------------------------------- creation
 
 
+def hash_guest_ip(ip: str | None, salt: str) -> str | None:
+    """Return salted SHA-256 hash of client IP. Never stores or logs raw IP."""
+    if not ip or not ip.strip():
+        return None
+    return hashlib.sha256(f"{salt}:{ip.strip()}".encode()).hexdigest()
+
+
 async def create_interview(
     db: AsyncSession,
     *,
@@ -106,6 +115,7 @@ async def create_interview(
     idempotency_key: str | None,
     settings: Settings,
     is_anonymous: bool = False,
+    client_ip: str | None = None,
 ) -> tuple[Interview, bool]:
     """Create an interview once. Returns (interview, created)."""
     if idempotency_key:
@@ -119,6 +129,7 @@ async def create_interview(
         if existing:
             return existing, False
 
+    guest_ip_hash: str | None = None
     if is_anonymous:
         total_created = (
             await db.execute(select(func.count()).select_from(Interview).where(Interview.user_id == user_id))
@@ -128,8 +139,54 @@ async def create_interview(
                 "Guests are limited to one interview. Create a free account to take more.",
                 code="guest_limit",
             )
+
+        # C) Daily guest cap (since 00:00 Asia/Kolkata)
+        kolkata_now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        kolkata_midnight = kolkata_now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+        guest_today_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(Interview)
+                .where(
+                    Interview.is_guest.is_(True),
+                    Interview.created_at >= kolkata_midnight,
+                )
+            )
+        ).scalar_one()
+        if guest_today_count >= settings.guest_daily_cap:
+            raise Forbidden(
+                "Free spots are full today. Create a free account to keep practising.",
+                code="guest_daily_cap",
+            )
+
+        # B) Network limit for guests (last 24 hours)
+        guest_ip_hash = hash_guest_ip(client_ip, settings.guest_ip_salt)
+        if guest_ip_hash:
+            since_24h = now_utc() - timedelta(hours=24)
+            network_guest_count = (
+                await db.execute(
+                    select(func.count())
+                    .select_from(Interview)
+                    .where(
+                        Interview.guest_ip_hash == guest_ip_hash,
+                        Interview.created_at >= since_24h,
+                    )
+                )
+            ).scalar_one()
+            if network_guest_count >= settings.guest_per_network_daily:
+                raise Forbidden(
+                    "Free guest interview limit reached for this network today. Create a free account to continue.",
+                    code="guest_network_limit",
+                )
+
         payload.duration_minutes = 10
         payload.recording_mode = "none"
+
+    if payload.recording_mode == "video" and not settings.allow_video_recording:
+        raise ValidationFailed(
+            "Video recording is not available. Choose audio only or no recording.",
+            code="VIDEO_RECORDING_DISABLED",
+        )
 
     resume = await get_owned_document(db, user_id, payload.resume_document_id)
     job = await get_owned_document(db, user_id, payload.job_description_document_id)
@@ -171,6 +228,7 @@ async def create_interview(
         evaluation_rigor=payload.evaluation_rigor,
         recording_mode=payload.recording_mode,
         is_guest=is_anonymous,
+        guest_ip_hash=guest_ip_hash,
         status="created",
         idempotency_key=idempotency_key,
     )

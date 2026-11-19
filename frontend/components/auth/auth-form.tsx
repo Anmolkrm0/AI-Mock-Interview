@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 
+import { Turnstile } from "@/components/common/turnstile";
 import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/feedback";
 import { FieldError, Input, Label } from "@/components/ui/field";
@@ -37,6 +38,7 @@ export function SignInForm() {
   const router = useRouter();
   const params = useSearchParams();
   const [formError, setFormError] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -54,7 +56,11 @@ export function SignInForm() {
           ? existingSessionData.session.access_token
           : null;
 
-      const { data: newAuthData, error } = await supabase.auth.signInWithPassword(values);
+      const { data: newAuthData, error } = await supabase.auth.signInWithPassword({
+        email: values.email,
+        password: values.password,
+        ...(captchaToken ? { options: { captchaToken } } : {}),
+      });
       if (error) {
         setFormError(authErrorMessage(error.message));
         return;
@@ -116,6 +122,9 @@ export function SignInForm() {
         />
         <FieldError id="password-error" message={errors.password?.message} />
       </div>
+      {env.turnstileSiteKey && (
+        <Turnstile onVerify={setCaptchaToken} onExpire={() => setCaptchaToken(null)} />
+      )}
       <Button type="submit" className="w-full" loading={isSubmitting}>
         Sign in
       </Button>
@@ -137,6 +146,7 @@ export function SignUpForm() {
   const params = useSearchParams();
   const [formError, setFormError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -163,6 +173,7 @@ export function SignUpForm() {
           },
           {
             emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+            ...(captchaToken ? ({ captchaToken } as { captchaToken: string }) : {}),
           },
         );
         if (error) {
@@ -193,6 +204,7 @@ export function SignUpForm() {
         options: {
           data: { display_name: values.name },
           emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+          ...(captchaToken ? { captchaToken } : {}),
         },
       });
       if (error) {
@@ -269,6 +281,9 @@ export function SignUpForm() {
         />
         <FieldError id="confirm-error" message={errors.confirm?.message} />
       </div>
+      {env.turnstileSiteKey && (
+        <Turnstile onVerify={setCaptchaToken} onExpire={() => setCaptchaToken(null)} />
+      )}
       <Button type="submit" className="w-full" loading={isSubmitting}>
         Create account
       </Button>

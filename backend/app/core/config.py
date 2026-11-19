@@ -88,6 +88,10 @@ class Settings(BaseModel):
     document_retention_days: int = 30
     completion_grace_seconds: int = 120
     abandoned_after_seconds: int = 15 * 60
+    guest_ip_salt: str = "guest_salt_local"
+    guest_per_network_daily: int = 2
+    guest_daily_cap: int = 20
+    allow_video_recording: bool = False
 
     # Rate limits (requests per minute, per user, per process)
     rate_limit_default_per_minute: int = 120

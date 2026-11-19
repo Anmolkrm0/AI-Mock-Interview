@@ -10,11 +10,20 @@ import asyncio
 import logging
 from datetime import timedelta
 
+import httpx
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
-from app.models import Document, Interview, RecordingUpload, StorageCleanupTask
+from app.models import (
+    Document,
+    GuestConversion,
+    Interview,
+    Profile,
+    Recording,
+    RecordingUpload,
+    StorageCleanupTask,
+)
 from app.providers.base import EvaluationProvider
 from app.services import recording_service, report_service
 from app.services.interview_service import complete_interview, now_utc
@@ -116,6 +125,98 @@ async def purge_document_text(db: AsyncSession, settings: Settings) -> int:
     return len(docs)
 
 
+async def cleanup_unclaimed_guests(
+    db: AsyncSession,
+    storage: StorageClient,
+    settings: Settings,
+    *,
+    http_client: httpx.AsyncClient | None = None,
+) -> int:
+    """Delete anonymous profiles older than 48 hours that were never converted."""
+    cutoff = now_utc() - timedelta(hours=48)
+    converted_subquery = select(GuestConversion.guest_user_id)
+    profiles = list(
+        (
+            await db.execute(
+                select(Profile)
+                .where(
+                    Profile.is_anonymous.is_(True),
+                    Profile.created_at < cutoff,
+                    Profile.id.not_in(converted_subquery),
+                )
+                .limit(50)
+                .with_for_update(skip_locked=True)
+            )
+        ).scalars()
+    )
+    if not profiles:
+        return 0
+
+    user_ids = [p.id for p in profiles]
+
+    # Queue storage cleanup for documents
+    docs = list((await db.execute(select(Document).where(Document.user_id.in_(user_ids)))).scalars())
+    for doc in docs:
+        if doc.storage_path:
+            db.add(
+                StorageCleanupTask(
+                    bucket=settings.documents_bucket,
+                    storage_path=doc.storage_path,
+                    reason="guest_expired",
+                )
+            )
+
+    # Queue storage cleanup for recording uploads and recordings
+    uploads = list(
+        (await db.execute(select(RecordingUpload).where(RecordingUpload.user_id.in_(user_ids)))).scalars()
+    )
+    for up in uploads:
+        if up.storage_path:
+            db.add(
+                StorageCleanupTask(
+                    bucket=settings.recordings_bucket,
+                    storage_path=up.storage_path,
+                    reason="guest_expired",
+                )
+            )
+
+    recs = list((await db.execute(select(Recording).where(Recording.user_id.in_(user_ids)))).scalars())
+    for rec in recs:
+        if rec.storage_path:
+            db.add(
+                StorageCleanupTask(
+                    bucket=settings.recordings_bucket,
+                    storage_path=rec.storage_path,
+                    reason="guest_expired",
+                )
+            )
+
+    # Delete profiles (cascades delete documents, interviews, and child rows)
+    for p in profiles:
+        await db.delete(p)
+    await db.commit()
+
+    # Delete users from Supabase Auth admin API if configured
+    if settings.supabase_url and settings.supabase_secret_key:
+        headers = {
+            "apikey": settings.supabase_secret_key,
+            "Authorization": f"Bearer {settings.supabase_secret_key}",
+        }
+        for uid in user_ids:
+            url = f"{settings.supabase_url.rstrip('/')}/auth/v1/admin/users/{uid}"
+            try:
+                if http_client is not None:
+                    await http_client.delete(url, headers=headers)
+                else:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        await client.delete(url, headers=headers)
+            except Exception as exc:
+                logger.warning("supabase_delete_guest_auth_user_failed error=%s", exc)
+
+    logger.info("cleaned_up_unclaimed_guests count=%d", len(profiles))
+    return len(profiles)
+
+
 async def tick(
     sessionmaker: async_sessionmaker[AsyncSession],
     provider: EvaluationProvider,
@@ -123,6 +224,7 @@ async def tick(
     settings: Settings,
     *,
     housekeeping: bool,
+    hourly: bool = False,
 ) -> None:
     if housekeeping:
         async with sessionmaker() as db:
@@ -137,6 +239,9 @@ async def tick(
             await expire_uploads(db, settings)
             await purge_document_text(db, settings)
             await run_cleanups(db, storage)
+    if hourly:
+        async with sessionmaker() as db:
+            await cleanup_unclaimed_guests(db, storage, settings)
 
 
 async def worker_loop(
@@ -148,9 +253,17 @@ async def worker_loop(
 ) -> None:
     logger.info("worker_started")
     iteration = 0
+    hourly_interval = max(1, int(3600 / max(settings.worker_poll_seconds, 1.0)))
     while not stop.is_set():
         try:
-            await tick(sessionmaker, provider, storage, settings, housekeeping=iteration % 12 == 0)
+            await tick(
+                sessionmaker,
+                provider,
+                storage,
+                settings,
+                housekeeping=iteration % 12 == 0,
+                hourly=iteration % hourly_interval == 0,
+            )
         except Exception:
             logger.exception("worker_tick_failed")
         iteration += 1

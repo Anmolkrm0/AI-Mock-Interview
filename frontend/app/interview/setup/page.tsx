@@ -101,7 +101,7 @@ export default function SetupPage() {
   const [customRole, setCustomRole] = useState("");
   const [duration, setDuration] = useState<Duration>(20);
   const [rigor, setRigor] = useState<Rigor>("standard");
-  const [recordingMode, setRecordingMode] = useState<RecordingMode>("audio");
+  const [recordingMode, setRecordingMode] = useState<RecordingMode>("none");
   const [isGuest, setIsGuest] = useState(false);
   const [consent, setConsent] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -284,6 +284,8 @@ export default function SetupPage() {
       setStartStage("idle");
       if (e instanceof ApiError && e.code === "PLAN_IN_PROGRESS") {
         setStartError("Your questions are still being prepared. Wait a few seconds and press Start again.");
+      } else if (e instanceof ApiError && e.code === "guest_daily_cap") {
+        setStartError("Free spots are full today. Create a free account to keep practising.");
       } else {
         setStartError(errorMessage(e));
       }
@@ -550,13 +552,15 @@ export default function SetupPage() {
                 <ChoiceGroup<RecordingMode>
                   name="recording"
                   legend="Save a recording you can replay?"
-                  columns={3}
+                  columns={env.allowVideoRecording ? 3 : 2}
                   value={recordingMode}
                   onChange={setRecordingMode}
                   error={fieldErrors.recordingMode}
                   choices={[
                     { value: "audio", label: "Audio only", description: "Smallest file." },
-                    { value: "video", label: "Video and audio", description: "Uses your camera." },
+                    ...(env.allowVideoRecording
+                      ? [{ value: "video" as RecordingMode, label: "Video and audio", description: "Uses your camera." }]
+                      : []),
                     { value: "none", label: "Don't record", description: "Transcript only." },
                   ]}
                 />

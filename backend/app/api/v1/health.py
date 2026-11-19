@@ -9,7 +9,19 @@ from app.db.session import get_sessionmaker
 
 router = APIRouter(tags=["health"])
 
-EXPECTED_HEAD = "0003"
+EXPECTED_HEAD = "0004"
+
+
+def is_migration_up_to_date(migration: str | None, expected_head: str = EXPECTED_HEAD) -> bool:
+    """True when migration revision is equal to or newer than expected_head (compared numerically)."""
+    if not migration:
+        return False
+    try:
+        curr = int("".join(c for c in migration.split("_")[0] if c.isdigit()))
+        exp = int("".join(c for c in expected_head.split("_")[0] if c.isdigit()))
+        return curr >= exp
+    except (ValueError, IndexError):
+        return migration >= expected_head
 
 
 async def _db_state() -> tuple[str, str | None]:
@@ -33,7 +45,11 @@ async def health(settings: SettingsDep, providers: Providers) -> dict:
         "status": "ok" if db_status == "ok" else "degraded",
         "version": settings.app_version,
         "environment": settings.environment,
-        "database": {"status": db_status, "migration": migration, "up_to_date": migration == EXPECTED_HEAD},
+        "database": {
+            "status": db_status,
+            "migration": migration,
+            "up_to_date": is_migration_up_to_date(migration, EXPECTED_HEAD),
+        },
         "providers": providers.status(),
         "storage": {"configured": bool(settings.supabase_url and settings.supabase_secret_key)},
         "auth": {"configured": bool(settings.supabase_url or settings.supabase_jwt_secret)},
@@ -44,7 +60,7 @@ async def health(settings: SettingsDep, providers: Providers) -> dict:
 async def ready() -> JSONResponse:
     """Readiness for Render health checks: DB reachable and migrations applied."""
     db_status, migration = await _db_state()
-    ok = db_status == "ok" and migration == EXPECTED_HEAD
+    ok = db_status == "ok" and is_migration_up_to_date(migration, EXPECTED_HEAD)
     return JSONResponse(
         status_code=200 if ok else 503,
         content={"ready": ok, "database": db_status, "migration": migration},

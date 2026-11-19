@@ -3,7 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Turnstile } from "@/components/common/turnstile";
 import { Button } from "@/components/ui/button";
+import { env } from "@/lib/env";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 
 interface StartInterviewButtonProps {
@@ -20,6 +22,7 @@ export function StartInterviewButton({
   children = "Start an interview",
 }: StartInterviewButtonProps) {
   const [loading, setLoading] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const router = useRouter();
 
   const handleStart = async () => {
@@ -30,7 +33,8 @@ export function StartInterviewButton({
         ? (await supabase.auth.getSession()).data?.session
         : null;
       if (!session && typeof supabase?.auth?.signInAnonymously === "function") {
-        const { error } = await supabase.auth.signInAnonymously();
+        const options = captchaToken ? { captchaToken } : undefined;
+        const { error } = await supabase.auth.signInAnonymously(options ? { options } : undefined);
         if (error) {
           console.error("Anonymous sign-in error:", error);
         }
@@ -45,15 +49,20 @@ export function StartInterviewButton({
   };
 
   return (
-    <Button
-      type="button"
-      onClick={handleStart}
-      loading={loading}
-      variant={variant}
-      size={size}
-      className={className}
-    >
-      {children}
-    </Button>
+    <div className="inline-flex flex-col items-center gap-3">
+      {env.turnstileSiteKey && (
+        <Turnstile onVerify={setCaptchaToken} onExpire={() => setCaptchaToken(null)} />
+      )}
+      <Button
+        type="button"
+        onClick={handleStart}
+        loading={loading}
+        variant={variant}
+        size={size}
+        className={className}
+      >
+        {children}
+      </Button>
+    </div>
   );
 }

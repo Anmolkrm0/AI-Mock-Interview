@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 
+from app.api.v1.health import is_migration_up_to_date
+from app.core.config import get_settings
+from app.db.session import get_sessionmaker
+from app.models import Profile, StorageCleanupTask
+from app.workers.jobs import cleanup_unclaimed_guests
 from tests.conftest import make_token
 from tests.test_api_integration import DOCX_MIME, JD, RESUME, docx_bytes, drain_jobs, ev
 
@@ -275,3 +282,238 @@ async def test_guest_claim_flow(client: AsyncClient, fakes) -> None:
     assert second_claim.status_code == 200
     assert second_claim.json()["claimed"] is True
     assert second_claim.json()["claimed_interviews"] == 0
+
+
+@pytest.mark.asyncio
+async def test_readiness_version_check(client: AsyncClient) -> None:
+    # Code expecting 0003 should consider 0004 ready, 0003 ready, but 0002 not ready
+    assert is_migration_up_to_date("0004", "0003") is True
+    assert is_migration_up_to_date("0003", "0003") is True
+    assert is_migration_up_to_date("0002", "0003") is False
+    assert is_migration_up_to_date("0001", "0003") is False
+    assert is_migration_up_to_date(None, "0003") is False
+
+    r = await client.get("/api/v1/ready")
+    assert r.status_code == 200
+    assert r.json()["ready"] is True
+
+
+@pytest.mark.asyncio
+async def test_video_recording_rejected_when_disabled(client: AsyncClient, monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "allow_video_recording", False)
+    user_id = uuid.uuid4()
+    user_auth = {"Authorization": f"Bearer {make_token(user_id)}"}
+    res_up = await client.post(
+        "/api/v1/documents/resume",
+        headers=user_auth,
+        files={"file": ("resume.docx", docx_bytes(RESUME), DOCX_MIME)},
+    )
+    job_up = await client.post(
+        "/api/v1/documents/job-description",
+        headers=user_auth,
+        data={"text": JD},
+    )
+    r = await client.post(
+        "/api/v1/interviews",
+        headers=user_auth,
+        json={
+            "resume_document_id": res_up.json()["id"],
+            "job_description_document_id": job_up.json()["id"],
+            "job_role": "Backend Engineer",
+            "duration_minutes": 20,
+            "evaluation_rigor": "standard",
+            "recording_mode": "video",
+            "consent_given": True,
+        },
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "VIDEO_RECORDING_DISABLED"
+
+
+@pytest.mark.asyncio
+async def test_guest_network_limit_and_daily_cap(client: AsyncClient, monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "guest_per_network_daily", 2)
+
+    client_ip = "203.0.113.42"
+    headers_ip = {"X-Forwarded-For": f"{client_ip}, 10.0.0.1"}
+
+    # 1. Guest 1 from this IP succeeds
+    g1_id = uuid.uuid4()
+    g1_auth = {"Authorization": f"Bearer {make_token(g1_id, is_anonymous=True)}", **headers_ip}
+    res1 = await client.post(
+        "/api/v1/documents/resume",
+        headers=g1_auth,
+        files={"file": ("resume.docx", docx_bytes(RESUME), DOCX_MIME)},
+    )
+    job1 = await client.post(
+        "/api/v1/documents/job-description",
+        headers=g1_auth,
+        data={"text": JD},
+    )
+    r1 = await client.post(
+        "/api/v1/interviews",
+        headers=g1_auth,
+        json={
+            "resume_document_id": res1.json()["id"],
+            "job_description_document_id": job1.json()["id"],
+            "job_role": "Backend Engineer",
+            "duration_minutes": 10,
+            "evaluation_rigor": "standard",
+            "recording_mode": "none",
+            "consent_given": True,
+        },
+    )
+    assert r1.status_code == 201
+
+    # 2. Guest 2 from this same IP succeeds
+    g2_id = uuid.uuid4()
+    g2_auth = {"Authorization": f"Bearer {make_token(g2_id, is_anonymous=True)}", **headers_ip}
+    res2 = await client.post(
+        "/api/v1/documents/resume",
+        headers=g2_auth,
+        files={"file": ("resume.docx", docx_bytes(RESUME), DOCX_MIME)},
+    )
+    job2 = await client.post(
+        "/api/v1/documents/job-description",
+        headers=g2_auth,
+        data={"text": JD},
+    )
+    r2 = await client.post(
+        "/api/v1/interviews",
+        headers=g2_auth,
+        json={
+            "resume_document_id": res2.json()["id"],
+            "job_description_document_id": job2.json()["id"],
+            "job_role": "Backend Engineer",
+            "duration_minutes": 10,
+            "evaluation_rigor": "standard",
+            "recording_mode": "none",
+            "consent_given": True,
+        },
+    )
+    assert r2.status_code == 201
+
+    # 3. Guest 3 from this same IP gets 403 guest_network_limit
+    g3_id = uuid.uuid4()
+    g3_auth = {"Authorization": f"Bearer {make_token(g3_id, is_anonymous=True)}", **headers_ip}
+    res3 = await client.post(
+        "/api/v1/documents/resume",
+        headers=g3_auth,
+        files={"file": ("resume.docx", docx_bytes(RESUME), DOCX_MIME)},
+    )
+    job3 = await client.post(
+        "/api/v1/documents/job-description",
+        headers=g3_auth,
+        data={"text": JD},
+    )
+    r3 = await client.post(
+        "/api/v1/interviews",
+        headers=g3_auth,
+        json={
+            "resume_document_id": res3.json()["id"],
+            "job_description_document_id": job3.json()["id"],
+            "job_role": "Backend Engineer",
+            "duration_minutes": 10,
+            "evaluation_rigor": "standard",
+            "recording_mode": "none",
+            "consent_given": True,
+        },
+    )
+    assert r3.status_code == 403
+    assert r3.json()["error"]["code"] == "guest_network_limit"
+
+    # 4. Daily cap reached
+    monkeypatch.setattr(settings, "guest_daily_cap", 2)
+    # Different IP so network limit isn't hit
+    g4_id = uuid.uuid4()
+    g4_auth = {
+        "Authorization": f"Bearer {make_token(g4_id, is_anonymous=True)}",
+        "X-Forwarded-For": "198.51.100.99",
+    }
+    res4 = await client.post(
+        "/api/v1/documents/resume",
+        headers=g4_auth,
+        files={"file": ("resume.docx", docx_bytes(RESUME), DOCX_MIME)},
+    )
+    job4 = await client.post(
+        "/api/v1/documents/job-description",
+        headers=g4_auth,
+        data={"text": JD},
+    )
+    r4 = await client.post(
+        "/api/v1/interviews",
+        headers=g4_auth,
+        json={
+            "resume_document_id": res4.json()["id"],
+            "job_description_document_id": job4.json()["id"],
+            "job_role": "Backend Engineer",
+            "duration_minutes": 10,
+            "evaluation_rigor": "standard",
+            "recording_mode": "none",
+            "consent_given": True,
+        },
+    )
+    assert r4.status_code == 403
+    assert r4.json()["error"]["code"] == "guest_daily_cap"
+
+
+@pytest.mark.asyncio
+async def test_worker_cleanup_unclaimed_guests(client: AsyncClient, fakes) -> None:
+    _, storage = fakes
+    settings = get_settings()
+    sessionmaker = get_sessionmaker()
+
+    # 1. Create an anonymous user older than 48 hours
+    old_guest_id = uuid.uuid4()
+    old_guest_auth = {"Authorization": f"Bearer {make_token(old_guest_id, is_anonymous=True)}"}
+    res_up = await client.post(
+        "/api/v1/documents/resume",
+        headers=old_guest_auth,
+        files={"file": ("resume.docx", docx_bytes(RESUME), DOCX_MIME)},
+    )
+    assert res_up.status_code == 201
+
+    # Manually backdate profile created_at to 50 hours ago
+    async with sessionmaker() as db:
+        old_prof = await db.get(Profile, old_guest_id)
+        assert old_prof is not None
+        old_prof.created_at = datetime.now(UTC) - timedelta(hours=50)
+        await db.commit()
+
+    # 2. Create a fresh anonymous user (< 48 hours old)
+    fresh_guest_id = uuid.uuid4()
+    fresh_guest_auth = {"Authorization": f"Bearer {make_token(fresh_guest_id, is_anonymous=True)}"}
+    res_fresh = await client.post(
+        "/api/v1/documents/resume",
+        headers=fresh_guest_auth,
+        files={"file": ("resume.docx", docx_bytes(RESUME), DOCX_MIME)},
+    )
+    assert res_fresh.status_code == 201
+
+    # Fake HTTP client to record Supabase auth delete calls
+    deleted_auth_urls: list[str] = []
+
+    class FakeAuthHttpClient:
+        async def delete(self, url: str, headers: dict) -> None:
+            deleted_auth_urls.append(url)
+
+    async with sessionmaker() as db:
+        cleaned_cnt = await cleanup_unclaimed_guests(db, storage, settings, http_client=FakeAuthHttpClient())
+        assert cleaned_cnt >= 1
+
+    # Verify old profile is gone, fresh profile still exists
+    async with sessionmaker() as db:
+        assert (await db.get(Profile, old_guest_id)) is None
+        assert (await db.get(Profile, fresh_guest_id)) is not None
+
+        # Storage cleanup task queued for old guest's document
+        tasks = list(
+            (
+                await db.execute(
+                    select(StorageCleanupTask).where(StorageCleanupTask.reason == "guest_expired")
+                )
+            ).scalars()
+        )
+        assert len(tasks) >= 1

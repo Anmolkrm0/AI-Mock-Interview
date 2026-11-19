@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated, Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import DB, AdminUser
+from app.api.deps import DB, AdminUser, SettingsDep
 from app.core.errors import NotFound
 from app.schemas.admin import (
     AdminInterviewItem,
@@ -55,6 +57,7 @@ async def admin_me(admin: AdminUser) -> AdminMeOut:
 async def get_overview(
     admin: AdminUser,
     db: DB,
+    settings: SettingsDep,
     days: Annotated[int, Query(ge=1, le=365)] = 30,
 ) -> AdminOverviewOut:
     params: dict[str, Any] = {"days": days}
@@ -148,6 +151,17 @@ async def get_overview(
     failed_cnt = int(i_res["failed"])
     completion_rate = round((completed_cnt / started_cnt) * 100, 1) if started_cnt > 0 else 0.0
 
+    # Guest interviews today since 00:00 Asia/Kolkata
+    kolkata_now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    kolkata_midnight = kolkata_now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+    guest_today_sql = """
+        SELECT count(*) FROM interviews
+        WHERE is_guest = true AND created_at >= :midnight
+    """
+    guest_interviews_today = int(
+        (await db.execute(text(guest_today_sql), {"midnight": kolkata_midnight})).scalar_one() or 0
+    )
+
     interviews_out = OverviewInterviewsOut(
         created=created_cnt,
         started=started_cnt,
@@ -157,6 +171,8 @@ async def get_overview(
         completion_rate=completion_rate,
         guest_interviews=int(i_res["guest_interviews"] or 0),
         registered_interviews=int(i_res["registered_interviews"] or 0),
+        guest_interviews_today=guest_interviews_today,
+        guest_daily_cap=settings.guest_daily_cap,
     )
 
     # 3. Averages

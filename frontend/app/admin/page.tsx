@@ -301,6 +301,9 @@ function OverviewTab() {
             </p>
             <p className="mt-1 text-xs text-slate">
               {data.interviews.registered_interviews ?? data.interviews.created} reg &bull; {data.interviews.guest_interviews ?? 0} guest
+              {data.interviews.guest_daily_cap !== undefined && (
+                <span> &bull; {data.interviews.guest_interviews_today ?? 0}/{data.interviews.guest_daily_cap} guest today</span>
+              )}
             </p>
           </div>
 
