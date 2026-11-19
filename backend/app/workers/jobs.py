@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.models import (
+    CreditLedger,
     Document,
     GuestConversion,
     Interview,
@@ -58,52 +59,54 @@ async def finalize_abandoned(db: AsyncSession, settings: Settings) -> int:
 
 
 async def refund_unstarted_or_failed(db: AsyncSession, settings: Settings) -> int:
-    """Refund interviews that failed or were abandoned without starting within 30 minutes."""
+    """Return credits for charged interviews that never started within 30 minutes.
+
+    Only runs when payments are on, and only touches interviews that were actually
+    charged and not yet refunded, so with payments off the app behaves as before.
+    The interview is cancelled as well, so a refunded interview can't be retried for free.
+    A state that can't move to "cancelled" is skipped instead of crashing the worker tick.
+    """
+    if not settings.payments_enabled:
+        return 0
+
+    from app.services.billing_service import refund_interview_credits
+    from app.services.interview_service import can_transition
+
+    charged = select(CreditLedger.interview_id).where(
+        CreditLedger.reason == "interview_use", CreditLedger.interview_id.is_not(None)
+    )
+    refunded = select(CreditLedger.interview_id).where(
+        CreditLedger.reason == "interview_refund", CreditLedger.interview_id.is_not(None)
+    )
     cutoff_30m = now_utc() - timedelta(minutes=30)
-    stale_unstarted = list(
+    stale = list(
         (
             await db.execute(
                 select(Interview)
                 .where(
+                    Interview.id.in_(charged),
+                    Interview.id.not_in(refunded),
                     Interview.started_at.is_(None),
                     Interview.created_at < cutoff_30m,
-                    Interview.status.not_in(("completed", "evaluating", "cancelled")),
+                    Interview.status.in_(("created", "preparing", "ready", "connecting", "failed")),
                 )
                 .limit(20)
                 .with_for_update(skip_locked=True)
             )
         ).scalars()
     )
-    from app.services.billing_service import refund_interview_credits
-    from app.services.interview_service import transition
 
     refund_count = 0
-    for interview in stale_unstarted:
-        transition(interview, "cancelled")
-        refunded = await refund_interview_credits(
-            db, interview_id=interview.id, reason_note="Interview expired after 30 minutes without starting"
+    for interview in stale:
+        if not can_transition(interview.status, "cancelled", interview.failure_stage):
+            continue
+        interview.status = "cancelled"
+        refunded_credits = await refund_interview_credits(
+            db,
+            interview_id=interview.id,
+            reason_note="Interview did not start within 30 minutes",
         )
-        if refunded:
-            refund_count += 1
-
-    failed_unstarted = list(
-        (
-            await db.execute(
-                select(Interview)
-                .where(
-                    Interview.status == "failed",
-                    Interview.started_at.is_(None),
-                )
-                .limit(20)
-                .with_for_update(skip_locked=True)
-            )
-        ).scalars()
-    )
-    for interview in failed_unstarted:
-        refunded = await refund_interview_credits(
-            db, interview_id=interview.id, reason_note="Interview failed before start"
-        )
-        if refunded:
+        if refunded_credits:
             refund_count += 1
 
     await db.commit()

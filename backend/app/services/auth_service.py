@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,8 @@ from app.core.security import AuthenticatedUser
 from app.models import Document, GuestConversion, Interview, Profile
 
 _known_profiles: set[uuid.UUID] = set()
+# Users already checked for the one-time free credit in this process (saves queries per request).
+_free_grant_checked: set[uuid.UUID] = set()
 
 
 async def ensure_profile(db: AsyncSession, user: AuthenticatedUser) -> None:
@@ -48,13 +51,20 @@ async def ensure_profile(db: AsyncSession, user: AuthenticatedUser) -> None:
             )
             await db.commit()
 
-        from app.services.billing_service import grant_free_credit_if_eligible
+        if user.id not in _free_grant_checked:
+            from app.services.billing_service import grant_free_credit_if_eligible
 
-        await grant_free_credit_if_eligible(db, user.id)
+            try:
+                await grant_free_credit_if_eligible(db, user.id)
+            except IntegrityError:
+                # A parallel request granted it first (unique free_grant index).
+                await db.rollback()
+            _free_grant_checked.add(user.id)
 
 
 def forget_profile_cache() -> None:
     _known_profiles.clear()
+    _free_grant_checked.clear()
 
 
 async def get_owned_interview(
