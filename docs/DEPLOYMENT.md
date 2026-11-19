@@ -71,6 +71,14 @@ Deploy the FastAPI service on Render as a free Web Service (or via `render.yaml`
 - `GUEST_PER_NETWORK_DAILY` — max guest interviews per network in 24 hours (default `2`)
 - `GUEST_DAILY_CAP` — max guest interviews per day since 00:00 Asia/Kolkata (default `20`)
 - `ALLOW_VIDEO_RECORDING` — `false` to disable video recording and protect free storage
+- `PAYMENTS_ENABLED` — `false` by default; set `true` to turn on Cashfree payment gateway & interview credit checks
+- `CASHFREE_APP_ID` — Cashfree Merchant App ID
+- `CASHFREE_SECRET_KEY` — Cashfree Secret Key
+- `CASHFREE_ENV` — `sandbox` (testing) or `production`
+- `CASHFREE_API_VERSION` — `2023-08-01`
+- `BACKEND_URL` — `https://<backend>.onrender.com` (public backend URL for Cashfree webhook notifications)
+- `FRONTEND_URL` — `https://<netlify-site>` (public frontend URL for Cashfree payment return redirect)
+- `TURNSTILE_SECRET_KEY` — optional Cloudflare Turnstile secret key for server-side verification
 
 ### Keep-awake pinger (₹0 cost)
 Render's free tier spins down services after 15 minutes of idle time. Set up a free external uptime monitor (such as [cron-job.org](https://cron-job.org) or [UptimeRobot](https://uptimerobot.com)) to ping:
@@ -98,6 +106,7 @@ every 10–14 minutes. This keeps the backend warm so candidates receive an imme
    - `NEXT_PUBLIC_RECORDING_MAX_BYTES` — `52428800`
    - `NEXT_PUBLIC_ALLOW_VIDEO_RECORDING` — `false` (optional, defaults to false)
    - `NEXT_PUBLIC_TURNSTILE_SITE_KEY` — optional Cloudflare Turnstile site key for bot verification
+   - `NEXT_PUBLIC_SUPPORT_EMAIL` — optional support email displayed on contact and legal pages (defaults to `support@mockinterview.in`)
 5. Click **Deploy site**. Once built, your site will be live at `https://<netlify-site>`.
 
 ---

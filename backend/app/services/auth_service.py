@@ -48,6 +48,10 @@ async def ensure_profile(db: AsyncSession, user: AuthenticatedUser) -> None:
             )
             await db.commit()
 
+        from app.services.billing_service import grant_free_credit_if_eligible
+
+        await grant_free_credit_if_eligible(db, user.id)
+
 
 def forget_profile_cache() -> None:
     _known_profiles.clear()

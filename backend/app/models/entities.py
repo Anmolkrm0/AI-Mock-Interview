@@ -403,3 +403,93 @@ class GuestConversion(Base):
     guest_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     registered_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     created_at: Mapped[datetime] = _created()
+
+
+class PaymentOrder(Base):
+    __tablename__ = "payment_orders"
+    __table_args__ = (
+        CheckConstraint("status in ('created','paid','failed','expired')", name="ck_payment_orders_status"),
+        Index("ix_payment_orders_user_created", "user_id", "created_at"),
+    )
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    package_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    credits: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount_paise: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR", server_default=text("'INR'"))
+    cf_order_id: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    cf_payment_id: Mapped[str | None] = mapped_column(String(128), unique=True, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="created")
+    created_at: Mapped[datetime] = _created()
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CreditLedger(Base):
+    __tablename__ = "credit_ledger"
+    __table_args__ = (
+        CheckConstraint(
+            "reason in ('purchase','interview_use','interview_refund','free_grant','admin_grant')",
+            name="ck_credit_ledger_reason",
+        ),
+        Index("ix_credit_ledger_user_created", "user_id", "created_at"),
+        Index(
+            "uq_credit_ledger_payment_order",
+            "payment_order_id",
+            unique=True,
+            postgresql_where=text("payment_order_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_credit_ledger_interview_use",
+            "interview_id",
+            unique=True,
+            postgresql_where=text("reason = 'interview_use'"),
+        ),
+        Index(
+            "uq_credit_ledger_interview_refund",
+            "interview_id",
+            unique=True,
+            postgresql_where=text("reason = 'interview_refund'"),
+        ),
+        Index(
+            "uq_credit_ledger_user_free_grant",
+            "user_id",
+            unique=True,
+            postgresql_where=text("reason = 'free_grant'"),
+        ),
+    )
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    payment_order_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("payment_orders.id", ondelete="SET NULL"), nullable=True
+    )
+    interview_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("interviews.id", ondelete="SET NULL"), nullable=True
+    )
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = _created()
+
+
+class ContactMessage(Base):
+    __tablename__ = "contact_messages"
+    __table_args__ = (
+        Index("ix_contact_messages_created", "created_at"),
+        Index("ix_contact_messages_handled", "handled"),
+    )
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = _created()
+    handled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))

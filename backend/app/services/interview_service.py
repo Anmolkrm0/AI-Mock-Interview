@@ -116,6 +116,7 @@ async def create_interview(
     settings: Settings,
     is_anonymous: bool = False,
     client_ip: str | None = None,
+    user_email: str | None = None,
 ) -> tuple[Interview, bool]:
     """Create an interview once. Returns (interview, created)."""
     if idempotency_key:
@@ -218,8 +219,9 @@ async def create_interview(
             code="DAILY_INTERVIEW_LIMIT",
         )
 
+    interview_id = uuid.uuid4()
     interview = Interview(
-        id=uuid.uuid4(),
+        id=interview_id,
         user_id=user_id,
         resume_document_id=resume.id,
         job_description_document_id=job.id,
@@ -233,6 +235,17 @@ async def create_interview(
         idempotency_key=idempotency_key,
     )
     db.add(interview)
+
+    is_admin = bool(user_email and user_email.lower() in [e.lower() for e in settings.admin_emails])
+    if settings.payments_enabled and not is_anonymous and not is_admin:
+        from app.services.billing_service import charge_interview_credits
+
+        await charge_interview_credits(
+            db,
+            user_id=user_id,
+            interview_id=interview_id,
+            duration_minutes=payload.duration_minutes,
+        )
     try:
         await db.commit()
     except IntegrityError:
@@ -639,6 +652,11 @@ async def cancel_interview(db: AsyncSession, interview: Interview) -> Interview:
     if interview.status not in ("created", "preparing", "ready", "failed", "connecting"):
         raise Conflict("Only interviews that haven't started can be cancelled.", code="CANCEL_NOT_ALLOWED")
     transition(interview, "cancelled")
+    from app.services.billing_service import refund_interview_credits
+
+    await refund_interview_credits(
+        db, interview_id=interview.id, reason_note="Interview cancelled before start"
+    )
     return interview
 
 

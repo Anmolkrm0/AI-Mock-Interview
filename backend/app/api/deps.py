@@ -55,7 +55,22 @@ async def current_user(
     return user
 
 
+async def optional_user(
+    request: Request,
+    verifier: Annotated[TokenVerifier, Depends(get_token_verifier)],
+) -> AuthenticatedUser | None:
+    header = request.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    try:
+        return await verifier.verify(token.strip())
+    except Exception:
+        return None
+
+
 CurrentUser = Annotated[AuthenticatedUser, Depends(current_user)]
+OptionalUser = Annotated[AuthenticatedUser | None, Depends(optional_user)]
 Providers = Annotated[ProviderRegistry, Depends(get_provider_registry)]
 Storage = Annotated[StorageClient, Depends(get_storage_client)]
 

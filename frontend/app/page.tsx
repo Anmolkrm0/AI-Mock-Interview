@@ -1,6 +1,7 @@
 import { FileText, Mic, ScrollText, Shield } from "lucide-react";
 import Link from "next/link";
 
+import { SiteFooter } from "@/components/common/site-footer";
 import { SiteHeader } from "@/components/common/site-header";
 import { StartInterviewButton } from "@/components/common/start-interview-button";
 import { buttonVariants } from "@/components/ui/button";
@@ -203,17 +204,13 @@ export default function LandingPage() {
               <StartInterviewButton
                 size="lg"
                 className="bg-white text-ink hover:bg-paper"
+                hintClassName="text-white/80"
               />
             </div>
           </div>
         </section>
       </main>
-      <footer className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-8 text-sm text-slate sm:px-8">
-        <p>AI Mock Interview. Practice tool; scores are guidance, not a hiring decision.</p>
-        <Link href="/signup" className="underline underline-offset-4">
-          Create an account
-        </Link>
-      </footer>
+      <SiteFooter />
     </>
   );
 }

@@ -282,6 +282,10 @@ export default function SetupPage() {
       router.push(`/interview/${id}/live`);
     } catch (e) {
       setStartStage("idle");
+      if (e instanceof ApiError && (e.status === 402 || e.code === "payment_required")) {
+        router.push("/pricing?reason=payment_required");
+        return;
+      }
       if (e instanceof ApiError && e.code === "PLAN_IN_PROGRESS") {
         setStartError("Your questions are still being prepared. Wait a few seconds and press Start again.");
       } else if (e instanceof ApiError && e.code === "guest_daily_cap") {

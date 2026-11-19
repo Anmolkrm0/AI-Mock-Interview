@@ -57,6 +57,8 @@ interface RequestOptions {
   /** Retries for transient failures (network, 502/503/504 from a cold start). */
   retries?: number;
   signal?: AbortSignal;
+  /** Set to true for endpoints accessible without signing in (or with optional auth). */
+  public?: boolean;
 }
 
 function sleep(ms: number) {
@@ -74,8 +76,21 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   const { method = "GET", retries = method === "GET" ? 2 : 0, timeoutMs = 30_000 } = options;
   let attempt = 0;
   for (;;) {
-    const token = await getAccessToken();
-    const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+    const headers: Record<string, string> = {};
+    if (!options.public) {
+      const token = await getAccessToken();
+      headers["Authorization"] = `Bearer ${token}`;
+    } else {
+      try {
+        const supabase = getSupabaseBrowser();
+        const { data } = await supabase.auth.getSession();
+        if (data.session) {
+          headers["Authorization"] = `Bearer ${data.session.access_token}`;
+        }
+      } catch {
+        // public request without auth
+      }
+    }
     if (options.body !== undefined) headers["Content-Type"] = "application/json";
     if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
 

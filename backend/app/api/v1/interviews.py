@@ -75,6 +75,7 @@ async def create_interview(
         settings=settings,
         is_anonymous=user.is_anonymous,
         client_ip=client_ip,
+        user_email=user.email,
     )
     if not created:
         response.status_code = 200

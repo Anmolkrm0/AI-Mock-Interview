@@ -57,6 +57,59 @@ async def finalize_abandoned(db: AsyncSession, settings: Settings) -> int:
     return len(rows)
 
 
+async def refund_unstarted_or_failed(db: AsyncSession, settings: Settings) -> int:
+    """Refund interviews that failed or were abandoned without starting within 30 minutes."""
+    cutoff_30m = now_utc() - timedelta(minutes=30)
+    stale_unstarted = list(
+        (
+            await db.execute(
+                select(Interview)
+                .where(
+                    Interview.started_at.is_(None),
+                    Interview.created_at < cutoff_30m,
+                    Interview.status.not_in(("completed", "evaluating", "cancelled")),
+                )
+                .limit(20)
+                .with_for_update(skip_locked=True)
+            )
+        ).scalars()
+    )
+    from app.services.billing_service import refund_interview_credits
+    from app.services.interview_service import transition
+
+    refund_count = 0
+    for interview in stale_unstarted:
+        transition(interview, "cancelled")
+        refunded = await refund_interview_credits(
+            db, interview_id=interview.id, reason_note="Interview expired after 30 minutes without starting"
+        )
+        if refunded:
+            refund_count += 1
+
+    failed_unstarted = list(
+        (
+            await db.execute(
+                select(Interview)
+                .where(
+                    Interview.status == "failed",
+                    Interview.started_at.is_(None),
+                )
+                .limit(20)
+                .with_for_update(skip_locked=True)
+            )
+        ).scalars()
+    )
+    for interview in failed_unstarted:
+        refunded = await refund_interview_credits(
+            db, interview_id=interview.id, reason_note="Interview failed before start"
+        )
+        if refunded:
+            refund_count += 1
+
+    await db.commit()
+    return refund_count
+
+
 async def run_cleanups(db: AsyncSession, storage: StorageClient) -> int:
     ids = list(
         (
@@ -229,6 +282,7 @@ async def tick(
     if housekeeping:
         async with sessionmaker() as db:
             await finalize_abandoned(db, settings)
+            await refund_unstarted_or_failed(db, settings)
     # Drain a few evaluation jobs per tick.
     for _ in range(3):
         status = await report_service.process_one(sessionmaker, provider, settings)

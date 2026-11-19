@@ -14,6 +14,7 @@ interface StartInterviewButtonProps {
   variant?: "primary" | "secondary" | "ghost" | "danger";
   size?: "sm" | "md" | "lg" | "icon";
   children?: React.ReactNode;
+  hintClassName?: string;
 }
 
 export function StartInterviewButton({
@@ -21,6 +22,7 @@ export function StartInterviewButton({
   variant,
   size = "lg",
   children = "Start an interview",
+  hintClassName,
 }: StartInterviewButtonProps) {
   const [loading, setLoading] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
@@ -75,7 +77,7 @@ export function StartInterviewButton({
             onExpire={() => setCaptchaToken(null)}
           />
           {!captchaToken && (
-            <p className="text-xs text-slate">Tick the box above to start</p>
+            <p className={cn("text-xs text-slate", hintClassName)}>Tick the box above to start</p>
           )}
         </div>
       )}

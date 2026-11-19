@@ -22,6 +22,7 @@ export function AppHeader() {
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
   const [isAnonymous, setIsAnonymous] = useState(false);
+  const [credits, setCredits] = useState<number | null>(null);
   const [isAdmin, setIsAdmin] = useState(() => {
     try {
       return typeof window !== "undefined" && sessionStorage.getItem("ai_mock_is_admin") === "true";
@@ -76,6 +77,23 @@ export function AppHeader() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    if (!isAnonymous) {
+      api<{ balance: number; is_guest: boolean }>("/billing/balance", { retries: 0 })
+        .then((data) => {
+          if (!active) return;
+          if (!data.is_guest) {
+            setCredits(data.balance);
+          }
+        })
+        .catch(() => {});
+    }
+    return () => {
+      active = false;
+    };
+  }, [isAnonymous, pathname]);
+
   const links = isAdmin
     ? [...baseLinks, { href: "/admin", label: "Admin" }]
     : baseLinks;
@@ -104,6 +122,16 @@ export function AppHeader() {
             </Link>
           ) : (
             <>
+              {credits !== null && (
+                <Link
+                  href="/pricing"
+                  className="mr-2 inline-flex min-h-[36px] items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink transition-colors hover:border-slate hover:bg-surface"
+                  title="Your interview credits. Click to buy more."
+                >
+                  <span className="font-semibold text-accent">{credits}</span>
+                  <span className="text-slate">{credits === 1 ? "credit" : "credits"}</span>
+                </Link>
+              )}
               {links.map((l) => (
                 <Link
                   key={l.href}

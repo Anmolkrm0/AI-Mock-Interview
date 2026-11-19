@@ -200,3 +200,52 @@ class FeedbackSummaryOut(BaseModel):
     rating_counts: dict[int, int]
     last_7_days: int
     with_comments: int
+
+
+class AdminPaymentOrderItem(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    user_email: str | None = None
+    package_code: str
+    credits: int
+    amount_inr: float
+    status: str
+    created_at: datetime
+    paid_at: datetime | None = None
+
+
+class AdminBillingStatsOut(BaseModel):
+    revenue_today_inr: float
+    revenue_30d_inr: float
+    total_revenue_inr: float
+    orders: list[AdminPaymentOrderItem]
+
+
+class AdminCreditGrantIn(BaseModel):
+    email: str
+    credits: int
+    note: str | None = None
+
+
+class AdminCreditGrantOut(BaseModel):
+    status: str
+    user_id: str
+    credits_granted: int
+    balance: int
+
+
+class AdminContactMessageItem(BaseModel):
+    id: uuid.UUID
+    name: str
+    email: str
+    message: str
+    user_id: uuid.UUID | None = None
+    user_email: str | None = None
+    created_at: datetime
+    handled: bool
+
+
+class AdminContactMessageListOut(BaseModel):
+    items: list[AdminContactMessageItem]
+    total: int
+

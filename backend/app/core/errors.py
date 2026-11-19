@@ -69,6 +69,12 @@ class Unauthorized(AppError):
     message = "Sign in to continue."
 
 
+class PaymentRequired(AppError):
+    status_code = 402
+    code = "payment_required"
+    message = "Payment required to continue."
+
+
 class Forbidden(AppError):
     status_code = 403
     code = "FORBIDDEN"

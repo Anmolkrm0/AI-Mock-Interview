@@ -476,4 +476,75 @@ export interface AdminInterviewListOut {
   total: number;
 }
 
+export interface BillingPackage {
+  code: string;
+  name: string;
+  credits: number;
+  amount_paise: number;
+  price_inr: number;
+  popular: boolean;
+  description: string;
+}
+
+export interface BillingPackagesOut {
+  packages: BillingPackage[];
+  interview_costs: Record<string, number>;
+  payments_enabled: boolean;
+}
+
+export interface BillingBalanceOut {
+  balance: number;
+  is_guest: boolean;
+  is_admin: boolean;
+}
+
+export interface OrderCreateOut {
+  order_id: string;
+  cf_order_id: string;
+  payment_session_id: string;
+  mode: string;
+}
+
+export interface OrderConfirmOut {
+  status: string;
+  balance: number;
+  credits: number;
+}
+
+export interface AdminPaymentOrderItem {
+  id: string;
+  user_id: string;
+  user_email: string | null;
+  package_code: string;
+  credits: number;
+  amount_inr: number;
+  status: string;
+  created_at: string;
+  paid_at: string | null;
+}
+
+export interface AdminBillingStatsOut {
+  revenue_today_inr: number;
+  revenue_30d_inr: number;
+  total_revenue_inr: number;
+  orders: AdminPaymentOrderItem[];
+}
+
+export interface AdminContactMessageItem {
+  id: string;
+  name: string;
+  email: string;
+  message: string;
+  user_id: string | null;
+  user_email: string | null;
+  created_at: string;
+  handled: boolean;
+}
+
+export interface AdminContactMessageListOut {
+  items: AdminContactMessageItem[];
+  total: number;
+}
+
+
 

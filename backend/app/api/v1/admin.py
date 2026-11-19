@@ -8,12 +8,20 @@ from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DB, AdminUser, SettingsDep
-from app.core.errors import NotFound
+from app.core.errors import NotFound, ValidationFailed
+from app.models import ContactMessage, CreditLedger, PaymentOrder, Profile
+from app.services import billing_service
 from app.schemas.admin import (
+    AdminBillingStatsOut,
+    AdminContactMessageItem,
+    AdminContactMessageListOut,
+    AdminCreditGrantIn,
+    AdminCreditGrantOut,
+    AdminPaymentOrderItem,
     AdminInterviewItem,
     AdminInterviewListOut,
     AdminMeOut,
@@ -809,3 +817,189 @@ async def feedback_summary(
         last_7_days=int(row["last_7_days"]),
         with_comments=int(row["with_comments"]),
     )
+
+
+@router.get("/billing/stats", response_model=AdminBillingStatsOut)
+async def admin_billing_stats(
+    admin: AdminUser,
+    db: DB,
+) -> AdminBillingStatsOut:
+    has_auth = await _has_auth_users(db)
+    auth_join = "LEFT JOIN auth.users u ON u.id = o.user_id" if has_auth else ""
+    user_email_select = "u.email AS user_email" if has_auth else "CAST(NULL AS text) AS user_email"
+
+    rev_sql = """
+        SELECT
+            coalesce(sum(amount_paise) FILTER (WHERE status = 'paid' AND (paid_at AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date), 0) AS rev_today,
+            coalesce(sum(amount_paise) FILTER (WHERE status = 'paid' AND paid_at >= now() - interval '30 days'), 0) AS rev_30d,
+            coalesce(sum(amount_paise) FILTER (WHERE status = 'paid'), 0) AS rev_total
+        FROM payment_orders
+    """
+    rev_row = (await db.execute(text(rev_sql))).mappings().one()
+    revenue_today_inr = round(float(rev_row["rev_today"]) / 100.0, 2)
+    revenue_30d_inr = round(float(rev_row["rev_30d"]) / 100.0, 2)
+    total_revenue_inr = round(float(rev_row["rev_total"]) / 100.0, 2)
+
+    orders_sql = f"""
+        SELECT
+            o.id,
+            o.user_id,
+            {user_email_select},
+            o.package_code,
+            o.credits,
+            (o.amount_paise / 100.0) AS amount_inr,
+            o.status,
+            o.created_at,
+            o.paid_at
+        FROM payment_orders o
+        {auth_join}
+        ORDER BY o.created_at DESC
+        LIMIT 50
+    """
+    orders_rows = (await db.execute(text(orders_sql))).mappings().all()
+    orders = [
+        AdminPaymentOrderItem(
+            id=row["id"],
+            user_id=row["user_id"],
+            user_email=row["user_email"],
+            package_code=row["package_code"],
+            credits=row["credits"],
+            amount_inr=float(row["amount_inr"]),
+            status=row["status"],
+            created_at=row["created_at"],
+            paid_at=row["paid_at"],
+        )
+        for row in orders_rows
+    ]
+    return AdminBillingStatsOut(
+        revenue_today_inr=revenue_today_inr,
+        revenue_30d_inr=revenue_30d_inr,
+        total_revenue_inr=total_revenue_inr,
+        orders=orders,
+    )
+
+
+@router.post("/billing/grant", response_model=AdminCreditGrantOut)
+async def admin_grant_credits(
+    body: AdminCreditGrantIn,
+    admin: AdminUser,
+    db: DB,
+) -> AdminCreditGrantOut:
+    if body.credits <= 0:
+        raise ValidationFailed("Credits must be a positive integer.", code="INVALID_CREDITS")
+
+    has_auth = await _has_auth_users(db)
+    target_user_id: uuid.UUID | None = None
+
+    try:
+        potential_uuid = uuid.UUID(body.email.strip())
+        prof = (await db.execute(select(Profile.id).where(Profile.id == potential_uuid))).scalar_one_or_none()
+        if prof:
+            target_user_id = prof
+    except (ValueError, AttributeError):
+        pass
+
+    if not target_user_id and has_auth:
+        user_row = (
+            await db.execute(
+                text("SELECT id FROM auth.users WHERE lower(email) = lower(:email)"),
+                {"email": body.email.strip()},
+            )
+        ).mappings().first()
+        if user_row:
+            target_user_id = user_row["id"]
+
+    if not target_user_id:
+        prof_row = (
+            await db.execute(
+                select(Profile.id).where(func.lower(Profile.display_name) == body.email.strip().lower())
+            )
+        ).scalar_one_or_none()
+        if prof_row:
+            target_user_id = prof_row
+
+    if not target_user_id:
+        raise NotFound(f"User with email or id '{body.email}' not found.", code="USER_NOT_FOUND")
+
+    ledger_entry = CreditLedger(
+        id=uuid.uuid4(),
+        user_id=target_user_id,
+        delta=body.credits,
+        reason="admin_grant",
+        note=body.note.strip() if body.note else "Admin grant",
+        created_by=admin.id,
+    )
+    db.add(ledger_entry)
+    await db.commit()
+
+    new_balance = await billing_service.get_balance(db, target_user_id)
+    return AdminCreditGrantOut(
+        status="ok",
+        user_id=str(target_user_id),
+        credits_granted=body.credits,
+        balance=new_balance,
+    )
+
+
+@router.get("/messages", response_model=AdminContactMessageListOut)
+async def list_contact_messages(
+    admin: AdminUser,
+    db: DB,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> AdminContactMessageListOut:
+    has_auth = await _has_auth_users(db)
+    auth_join = "LEFT JOIN auth.users u ON u.id = m.user_id" if has_auth else ""
+    user_email_select = "u.email AS user_email" if has_auth else "CAST(NULL AS text) AS user_email"
+
+    total = int(
+        (await db.execute(select(func.count()).select_from(ContactMessage))).scalar_one() or 0
+    )
+
+    sql = f"""
+        SELECT
+            m.id,
+            m.name,
+            m.email,
+            m.message,
+            m.user_id,
+            {user_email_select},
+            m.created_at,
+            m.handled
+        FROM contact_messages m
+        {auth_join}
+        ORDER BY m.created_at DESC
+        LIMIT :limit OFFSET :offset
+    """
+    rows = (await db.execute(text(sql), {"limit": limit, "offset": offset})).mappings().all()
+    items = [
+        AdminContactMessageItem(
+            id=row["id"],
+            name=row["name"],
+            email=row["email"],
+            message=row["message"],
+            user_id=row["user_id"],
+            user_email=row["user_email"],
+            created_at=row["created_at"],
+            handled=bool(row["handled"]),
+        )
+        for row in rows
+    ]
+    return AdminContactMessageListOut(items=items, total=total)
+
+
+@router.post("/messages/{message_id}/handle")
+async def mark_message_handled(
+    message_id: uuid.UUID,
+    admin: AdminUser,
+    db: DB,
+) -> dict[str, str]:
+    msg = (
+        await db.execute(select(ContactMessage).where(ContactMessage.id == message_id))
+    ).scalar_one_or_none()
+    if not msg:
+        raise NotFound(f"Message '{message_id}' not found.", code="MESSAGE_NOT_FOUND")
+    msg.handled = True
+    await db.commit()
+    return {"status": "ok", "message_id": str(message_id)}
+

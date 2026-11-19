@@ -92,6 +92,16 @@ class Settings(BaseModel):
     guest_per_network_daily: int = 2
     guest_daily_cap: int = 20
     allow_video_recording: bool = False
+    turnstile_secret_key: str = ""
+
+    # Payments & Cashfree
+    payments_enabled: bool = False
+    cashfree_app_id: str = ""
+    cashfree_secret_key: str = ""
+    cashfree_env: str = "sandbox"  # sandbox | production
+    cashfree_api_version: str = "2023-08-01"
+    backend_url: str = "http://localhost:8000"
+    frontend_url: str = "http://localhost:3000"
 
     # Rate limits (requests per minute, per user, per process)
     rate_limit_default_per_minute: int = 120

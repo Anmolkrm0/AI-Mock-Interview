@@ -44,6 +44,17 @@ export const Turnstile = forwardRef<TurnstileRef, TurnstileProps>(function Turns
   const widgetIdRef = useRef<string | null>(null);
   const siteKey = env.turnstileSiteKey;
 
+  // Keep the latest callbacks in refs so a parent re-render (e.g. typing in the form)
+  // does not remove and re-create the widget, which left it stuck on "Verifying...".
+  const onVerifyRef = useRef(onVerify);
+  const onExpireRef = useRef(onExpire);
+  const onErrorRef = useRef(onError);
+  useEffect(() => {
+    onVerifyRef.current = onVerify;
+    onExpireRef.current = onExpire;
+    onErrorRef.current = onError;
+  }, [onVerify, onExpire, onError]);
+
   useImperativeHandle(ref, () => ({
     reset: () => {
       if (widgetIdRef.current && typeof window !== "undefined" && window.turnstile) {
@@ -65,9 +76,9 @@ export const Turnstile = forwardRef<TurnstileRef, TurnstileProps>(function Turns
           widgetIdRef.current = window.turnstile.render(containerRef.current, {
             sitekey: siteKey,
             size: "flexible",
-            callback: onVerify,
-            "error-callback": onError,
-            "expired-callback": onExpire,
+            callback: (token: string) => onVerifyRef.current(token),
+            "error-callback": () => onErrorRef.current?.(),
+            "expired-callback": () => onExpireRef.current?.(),
           });
         } catch {
           // ignore render errors if already mounted
@@ -95,7 +106,7 @@ export const Turnstile = forwardRef<TurnstileRef, TurnstileProps>(function Turns
         widgetIdRef.current = null;
       }
     };
-  }, [siteKey, onVerify, onExpire, onError]);
+  }, [siteKey]);
 
   if (!siteKey) return null;
 
