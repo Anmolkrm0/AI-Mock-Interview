@@ -69,7 +69,7 @@ function ReturnContent() {
         <div className="w-full max-w-md rounded-xl border border-line bg-surface p-8 text-center shadow-xs">
           {loading ? (
             <div className="space-y-4">
-              <div className="mx-auto size-12 animate-spin rounded-full border-4 border-accent border-t-transparent" />
+              <div className="mx-auto size-12 animate-spin rounded-full border-4 border-ink border-t-transparent" />
               <h1 className="text-xl font-semibold text-ink">Verifying payment…</h1>
               <p className="text-sm text-slate">Please wait while we confirm your payment with Cashfree.</p>
             </div>
@@ -100,7 +100,7 @@ function ReturnContent() {
 
               <div className="my-6 rounded-lg border border-line bg-paper p-4">
                 <p className="text-xs font-medium uppercase text-slate">New Credit Balance</p>
-                <p className="mt-1 text-3xl font-semibold text-accent">{result.balance}</p>
+                <p className="mt-1 text-3xl font-semibold text-ink">{result.balance}</p>
                 <p className="text-xs text-slate">
                   +{result.credits} credits added
                 </p>
@@ -109,7 +109,7 @@ function ReturnContent() {
               <div className="flex flex-col gap-2 pt-2">
                 <Link
                   href="/interview/setup"
-                  className="block w-full rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+                  className="block w-full rounded-md bg-ink px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-ink-soft"
                 >
                   Start an interview
                 </Link>
@@ -124,14 +124,16 @@ function ReturnContent() {
           ) : (
             <div className="space-y-4">
               <XCircle className="mx-auto size-12 text-signal" />
-              <h1 className="text-xl font-semibold text-ink">Payment {result?.status || "Incomplete"}</h1>
+              <h1 className="text-xl font-semibold text-ink">
+                {result?.status === "failed" ? "Payment failed" : result?.status === "expired" ? "Payment expired" : "Payment not completed"}
+              </h1>
               <p className="text-sm text-slate">
-                The payment was not completed or has expired. If amount was debited from your bank, it will be automatically refunded within 5-7 working days.
+                The payment was not completed or has expired. No credits were added. If money left your account, contact us and we will refund it within 5–7 working days.
               </p>
               <div className="pt-4 flex flex-col gap-2">
                 <Link
                   href="/pricing"
-                  className="block w-full rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+                  className="block w-full rounded-md bg-ink px-4 py-2 text-sm font-medium text-white hover:bg-ink-soft"
                 >
                   Try Again
                 </Link>

@@ -22,7 +22,7 @@ const DEFAULT_PACKAGES: BillingPackage[] = [
     amount_paise: 14900,
     price_inr: 149,
     popular: false,
-    description: "1 interview credit",
+    description: "1 interview · ₹149 per credit",
   },
   {
     code: "starter",
@@ -31,7 +31,7 @@ const DEFAULT_PACKAGES: BillingPackage[] = [
     amount_paise: 29900,
     price_inr: 299,
     popular: false,
-    description: "3 interview credits (₹100/interview)",
+    description: "3 interviews · ₹100 per credit",
   },
   {
     code: "pro",
@@ -40,7 +40,7 @@ const DEFAULT_PACKAGES: BillingPackage[] = [
     amount_paise: 69900,
     price_inr: 699,
     popular: true,
-    description: "8 interview credits (Best value)",
+    description: "8 interviews · ₹87 per credit",
   },
   {
     code: "job_hunt",
@@ -49,7 +49,7 @@ const DEFAULT_PACKAGES: BillingPackage[] = [
     amount_paise: 119900,
     price_inr: 1199,
     popular: false,
-    description: "15 interview credits (Full prep)",
+    description: "15 interviews · ₹80 per credit, the lowest price",
   },
 ];
 
@@ -77,6 +77,7 @@ function PricingContent() {
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [isGuest, setIsGuest] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [purchasingCode, setPurchasingCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -100,6 +101,14 @@ function PricingContent() {
         const session = data?.session;
         setIsSignedIn(Boolean(session));
         setIsGuest(Boolean(session?.user?.is_anonymous));
+        if (session && !session.user?.is_anonymous) {
+          billingApi
+            .getBalance()
+            .then((b) => {
+              if (active) setIsAdmin(Boolean(b.is_admin));
+            })
+            .catch(() => {});
+        }
       });
     }
 
@@ -182,13 +191,13 @@ function PricingContent() {
                 key={pkg.code}
                 className={`relative flex flex-col justify-between rounded-xl border bg-surface p-6 transition-shadow ${
                   pkg.popular
-                    ? "border-accent shadow-md ring-1 ring-accent"
+                    ? "border-ink shadow-md ring-1 ring-ink"
                     : "border-line shadow-xs hover:border-line-strong"
                 }`}
               >
                 {pkg.popular && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-accent px-3 py-0.5 text-xs font-semibold uppercase tracking-wider text-white">
+                    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-ink px-3 py-1 text-xs font-semibold uppercase tracking-wider text-white">
                       <Sparkles className="size-3" /> Most popular
                     </span>
                   </div>
@@ -229,10 +238,14 @@ function PricingContent() {
                   {isGuest || !isSignedIn ? (
                     <Link
                       href={`/signup?next=${encodeURIComponent("/pricing")}`}
-                      className="block w-full rounded-md bg-accent px-4 py-2.5 text-center text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+                      className="block w-full rounded-md bg-ink px-4 py-2.5 text-center text-sm font-medium text-white transition-colors hover:bg-ink-soft"
                     >
                       Sign up to buy
                     </Link>
+                  ) : !paymentsEnabled && !isAdmin ? (
+                    <Button disabled variant="secondary" className="w-full py-2.5 text-sm font-medium">
+                      Opening soon
+                    </Button>
                   ) : (
                     <Button
                       onClick={() => void handleBuy(pkg)}
@@ -252,7 +265,7 @@ function PricingContent() {
           <div className="mt-16 rounded-xl border border-line bg-surface p-6 sm:p-8">
             <h2 className="text-xl font-semibold text-ink">How interview credits work</h2>
             <p className="mt-2 text-sm text-slate">
-              Credits are deducted only when an interview starts. If an interview fails to connect or is cancelled before starting, credits are automatically refunded to your balance.
+              Credits are used when you set up an interview. If it fails to connect, is cancelled, or does not start within 30 minutes, the credits go back to your balance automatically.
             </p>
 
             <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">

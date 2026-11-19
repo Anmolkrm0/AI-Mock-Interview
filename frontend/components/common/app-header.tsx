@@ -22,6 +22,8 @@ export function AppHeader() {
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
   const [isAnonymous, setIsAnonymous] = useState(false);
+  // null = still checking; false = signed out (public pages like /pricing, /contact).
+  const [hasSession, setHasSession] = useState<boolean | null>(null);
   const [credits, setCredits] = useState<number | null>(null);
   const [isAdmin, setIsAdmin] = useState(() => {
     try {
@@ -37,6 +39,7 @@ export function AppHeader() {
     if (typeof supabase?.auth?.getSession === "function") {
       supabase.auth.getSession().then(({ data }) => {
         if (!active) return;
+        setHasSession(Boolean(data?.session));
         setIsAnonymous(Boolean(data?.session?.user?.is_anonymous));
       });
     }
@@ -47,6 +50,7 @@ export function AppHeader() {
 
   useEffect(() => {
     let active = true;
+    if (!hasSession || isAnonymous) return;
     try {
       const cached = sessionStorage.getItem("ai_mock_is_admin");
       if (cached === "true") {
@@ -75,11 +79,11 @@ export function AppHeader() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [hasSession, isAnonymous]);
 
   useEffect(() => {
     let active = true;
-    if (!isAnonymous) {
+    if (hasSession && !isAnonymous) {
       api<{ balance: number; is_guest: boolean }>("/billing/balance", { retries: 0 })
         .then((data) => {
           if (!active) return;
@@ -92,7 +96,7 @@ export function AppHeader() {
     return () => {
       active = false;
     };
-  }, [isAnonymous, pathname]);
+  }, [hasSession, isAnonymous, pathname]);
 
   const links = isAdmin
     ? [...baseLinks, { href: "/admin", label: "Admin" }]
@@ -112,11 +116,26 @@ export function AppHeader() {
     <header className="border-b border-line bg-surface">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3.5 sm:px-8">
         <Wordmark />
-        <nav aria-label="Main" className="flex items-center gap-1">
-          {isAnonymous ? (
+        <nav aria-label="Main" className="flex min-w-0 items-center gap-0.5 sm:gap-1">
+          {hasSession === null ? null : !hasSession ? (
+            <>
+              <Link
+                href="/login"
+                className="hidden min-h-[44px] items-center rounded-sm px-3 py-2 text-sm font-medium text-slate hover:text-ink sm:inline-flex"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/signup"
+                className="inline-flex min-h-[44px] items-center rounded-md bg-ink px-3 py-1.5 text-sm font-medium text-white hover:bg-ink-soft"
+              >
+                Create account
+              </Link>
+            </>
+          ) : isAnonymous ? (
             <Link
               href={`/signup?next=${encodeURIComponent(pathname)}`}
-              className="inline-flex min-h-[44px] items-center rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover"
+              className="inline-flex min-h-[44px] items-center rounded-md bg-ink px-3 py-1.5 text-sm font-medium text-white hover:bg-ink-soft"
             >
               Create free account
             </Link>
@@ -125,11 +144,11 @@ export function AppHeader() {
               {credits !== null && (
                 <Link
                   href="/pricing"
-                  className="mr-2 inline-flex min-h-[36px] items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink transition-colors hover:border-slate hover:bg-surface"
+                  className="mr-1 inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-full sm:mr-2 border border-line bg-paper px-3 py-1 text-xs font-medium text-ink transition-colors hover:border-slate hover:bg-surface"
                   title="Your interview credits. Click to buy more."
                 >
-                  <span className="font-semibold text-accent">{credits}</span>
-                  <span className="text-slate">{credits === 1 ? "credit" : "credits"}</span>
+                  <span className="font-semibold text-ink">{credits}</span>
+                  <span className="hidden text-slate sm:inline">{credits === 1 ? "credit" : "credits"}</span>
                 </Link>
               )}
               {links.map((l) => (
@@ -138,7 +157,7 @@ export function AppHeader() {
                   href={l.href}
                   aria-current={pathname.startsWith(l.href) ? "page" : undefined}
                   className={cn(
-                    "inline-flex min-h-[44px] items-center rounded-sm px-3 py-2 text-sm font-medium text-slate hover:text-ink",
+                    "inline-flex min-h-[44px] items-center rounded-sm px-2 py-2 text-sm font-medium text-slate hover:text-ink sm:px-3",
                     pathname.startsWith(l.href) && "text-ink underline decoration-2 underline-offset-[10px]",
                   )}
                 >

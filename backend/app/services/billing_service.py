@@ -11,6 +11,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+import logging
+
 import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import Conflict, Forbidden, NotFound, PaymentRequired, ValidationFailed
 from app.models import CreditLedger, Interview, PaymentOrder
+
+logger = logging.getLogger(__name__)
 
 PACKAGES: list[dict[str, Any]] = [
     {
@@ -27,7 +31,7 @@ PACKAGES: list[dict[str, Any]] = [
         "amount_paise": 14900,
         "price_inr": 149,
         "popular": False,
-        "description": "1 interview credit",
+        "description": "1 interview · ₹149 per credit",
     },
     {
         "code": "starter",
@@ -36,7 +40,7 @@ PACKAGES: list[dict[str, Any]] = [
         "amount_paise": 29900,
         "price_inr": 299,
         "popular": False,
-        "description": "3 interview credits (Rs 100/interview)",
+        "description": "3 interviews · ₹100 per credit",
     },
     {
         "code": "pro",
@@ -45,7 +49,7 @@ PACKAGES: list[dict[str, Any]] = [
         "amount_paise": 69900,
         "price_inr": 699,
         "popular": True,
-        "description": "8 interview credits (Best value)",
+        "description": "8 interviews · ₹87 per credit",
     },
     {
         "code": "job_hunt",
@@ -54,7 +58,7 @@ PACKAGES: list[dict[str, Any]] = [
         "amount_paise": 119900,
         "price_inr": 1199,
         "popular": False,
-        "description": "15 interview credits (Full prep)",
+        "description": "15 interviews · ₹80 per credit, the lowest price",
     },
 ]
 
@@ -237,8 +241,9 @@ async def create_cashfree_order(
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(url, headers=headers, json=payload)
         if resp.status_code >= 400:
+            logger.warning("cashfree_create_order_failed status=%s", resp.status_code)
             raise ValidationFailed(
-                f"Cashfree order creation failed: {resp.text}",
+                "We couldn't start the payment. Please try again in a minute.",
                 code="CASHFREE_ERROR",
             )
         return resp.json()
