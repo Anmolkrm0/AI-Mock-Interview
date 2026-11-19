@@ -19,6 +19,7 @@ const body = IBM_Plex_Sans({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://mockinterview-app.netlify.app"),
   title: { default: "AI Mock Interview", template: "%s · AI Mock Interview" },
   description:
     "Practice a spoken interview for the exact job you're applying to, then see which answers held up and why.",
