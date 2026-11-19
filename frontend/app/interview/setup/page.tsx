@@ -546,7 +546,7 @@ export default function SetupPage() {
             <div className={cn("space-y-6", locked && "pointer-events-none")}>
               {isGuest ? (
                 <Notice tone="info">
-                  Recordings are not saved for guest sessions. Your interview answers are transcribed and evaluated. Create a free account to enable audio/video recordings.
+                  Recordings are not saved for guest sessions. Your interview answers are transcribed and evaluated. Create a free account to enable audio recordings.
                 </Notice>
               ) : (
                 <ChoiceGroup<RecordingMode>

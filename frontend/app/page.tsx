@@ -91,9 +91,12 @@ export default function LandingPage() {
               An AI interviewer reads your resume and the job description, asks role-specific questions out loud, and
               follows up when an answer is thin. Afterwards you see exactly which lines earned each score.
             </p>
-            <div className="mt-8 flex flex-wrap items-center gap-3">
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
               <StartInterviewButton size="lg" />
-              <Link href="/login" className={buttonVariants({ variant: "secondary", size: "lg" })}>
+              <Link
+                href="/login"
+                className={cn(buttonVariants({ variant: "secondary", size: "lg" }), "w-full sm:w-auto")}
+              >
                 Sign in
               </Link>
             </div>
@@ -196,7 +199,7 @@ export default function LandingPage() {
                 </div>
               ))}
             </dl>
-            <div className="mt-12 flex flex-wrap items-center gap-4">
+            <div className="mt-12 flex flex-col gap-4 sm:flex-row sm:items-end">
               <StartInterviewButton
                 size="lg"
                 className="bg-white text-ink hover:bg-paper"

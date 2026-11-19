@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import Script from "next/script";
 
 import { env } from "@/lib/env";
+
+export interface TurnstileRef {
+  reset: () => void;
+}
 
 interface TurnstileProps {
   onVerify: (token: string) => void;
@@ -23,6 +27,7 @@ declare global {
           "error-callback"?: () => void;
           "expired-callback"?: () => void;
           theme?: "light" | "dark" | "auto";
+          size?: "normal" | "compact" | "flexible";
         },
       ) => string;
       reset: (widgetId: string) => void;
@@ -31,10 +36,25 @@ declare global {
   }
 }
 
-export function Turnstile({ onVerify, onExpire, onError, className }: TurnstileProps) {
+export const Turnstile = forwardRef<TurnstileRef, TurnstileProps>(function Turnstile(
+  { onVerify, onExpire, onError, className },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
   const siteKey = env.turnstileSiteKey;
+
+  useImperativeHandle(ref, () => ({
+    reset: () => {
+      if (widgetIdRef.current && typeof window !== "undefined" && window.turnstile) {
+        try {
+          window.turnstile.reset(widgetIdRef.current);
+        } catch {
+          // ignore reset error
+        }
+      }
+    },
+  }));
 
   useEffect(() => {
     if (!siteKey || !containerRef.current) return;
@@ -44,6 +64,7 @@ export function Turnstile({ onVerify, onExpire, onError, className }: TurnstileP
         try {
           widgetIdRef.current = window.turnstile.render(containerRef.current, {
             sitekey: siteKey,
+            size: "flexible",
             callback: onVerify,
             "error-callback": onError,
             "expired-callback": onExpire,
@@ -79,12 +100,12 @@ export function Turnstile({ onVerify, onExpire, onError, className }: TurnstileP
   if (!siteKey) return null;
 
   return (
-    <div className={className}>
+    <div className={className ?? "w-full"}>
       <Script
         src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
         strategy="lazyOnload"
       />
-      <div ref={containerRef} />
+      <div ref={containerRef} className="w-full max-w-sm" />
     </div>
   );
-}
+});

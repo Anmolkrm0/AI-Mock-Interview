@@ -39,55 +39,63 @@ export function SignInForm() {
   const params = useSearchParams();
   const [formError, setFormError] = useState<string | null>(null);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [turnstileKey, setTurnstileKey] = useState(0);
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<SignInValues>({ resolver: zodResolver(signInSchema) });
 
-  const onSubmit = handleSubmit(async (values) => {
-    setFormError(null);
-    try {
-      const supabase = getSupabaseBrowser();
-      // Keep anonymous guest access token in memory only
-      const { data: existingSessionData } = await supabase.auth.getSession();
-      const guestToken =
-        existingSessionData.session?.user?.is_anonymous && existingSessionData.session?.access_token
-          ? existingSessionData.session.access_token
-          : null;
+  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    void handleSubmit(async (values) => {
+      setFormError(null);
+      try {
+        const supabase = getSupabaseBrowser();
+        // Keep anonymous guest access token in memory only
+        const { data: existingSessionData } = await supabase.auth.getSession();
+        const guestToken =
+          existingSessionData.session?.user?.is_anonymous && existingSessionData.session?.access_token
+            ? existingSessionData.session.access_token
+            : null;
 
-      const { data: newAuthData, error } = await supabase.auth.signInWithPassword({
-        email: values.email,
-        password: values.password,
-        ...(captchaToken ? { options: { captchaToken } } : {}),
-      });
-      if (error) {
-        setFormError(authErrorMessage(error.message));
-        return;
-      }
-
-      // If an anonymous guest session existed, claim its rows
-      if (guestToken && newAuthData.session?.access_token) {
-        try {
-          await fetch(`${env.apiUrl}/guest/claim`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${newAuthData.session.access_token}`,
-            },
-            body: JSON.stringify({ guest_token: guestToken }),
-          });
-        } catch (err) {
-          console.error("Claim error:", err);
+        const { data: newAuthData, error } = await supabase.auth.signInWithPassword({
+          email: values.email,
+          password: values.password,
+          ...(captchaToken ? { options: { captchaToken } } : {}),
+        });
+        if (error) {
+          setFormError(authErrorMessage(error.message));
+          setCaptchaToken(null);
+          setTurnstileKey((k) => k + 1);
+          return;
         }
-      }
 
-      router.replace(safeNextPath(params.get("next")));
-      router.refresh();
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : "Couldn't sign in.");
-    }
-  });
+        // If an anonymous guest session existed, claim its rows
+        if (guestToken && newAuthData.session?.access_token) {
+          try {
+            await fetch(`${env.apiUrl}/guest/claim`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${newAuthData.session.access_token}`,
+              },
+              body: JSON.stringify({ guest_token: guestToken }),
+            });
+          } catch (err) {
+            console.error("Claim error:", err);
+          }
+        }
+
+        router.replace(safeNextPath(params.get("next")));
+        router.refresh();
+      } catch (e) {
+        setFormError(e instanceof Error ? e.message : "Couldn't sign in.");
+        setCaptchaToken(null);
+        setTurnstileKey((k) => k + 1);
+      }
+    })(e);
+  };
 
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-5">
@@ -123,9 +131,26 @@ export function SignInForm() {
         <FieldError id="password-error" message={errors.password?.message} />
       </div>
       {env.turnstileSiteKey && (
-        <Turnstile onVerify={setCaptchaToken} onExpire={() => setCaptchaToken(null)} />
+        <div className="flex flex-col items-center gap-1.5">
+          <Turnstile
+            key={turnstileKey}
+            onVerify={(token) => {
+              setCaptchaToken(token);
+              setFormError(null);
+            }}
+            onExpire={() => setCaptchaToken(null)}
+          />
+          {!captchaToken && (
+            <p className="text-xs text-slate">Tick the box above to continue</p>
+          )}
+        </div>
       )}
-      <Button type="submit" className="w-full" loading={isSubmitting}>
+      <Button
+        type="submit"
+        className="w-full"
+        loading={isSubmitting}
+        disabled={isSubmitting || (Boolean(env.turnstileSiteKey) && !captchaToken)}
+      >
         Sign in
       </Button>
       <p className="text-center text-sm text-slate">
@@ -147,80 +172,90 @@ export function SignUpForm() {
   const [formError, setFormError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [turnstileKey, setTurnstileKey] = useState(0);
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<SignUpValues>({ resolver: zodResolver(signUpSchema) });
 
-  const onSubmit = handleSubmit(async (values) => {
-    setFormError(null);
-    try {
-      const next = safeNextPath(params.get("next"));
-      const supabase = getSupabaseBrowser();
-      const {
-        data: { session: currentSession },
-      } = await supabase.auth.getSession();
-      const isAnonymous = Boolean(currentSession?.user?.is_anonymous);
+  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    void handleSubmit(async (values) => {
+      setFormError(null);
+      try {
+        const next = safeNextPath(params.get("next"));
+        const supabase = getSupabaseBrowser();
+        const {
+          data: { session: currentSession },
+        } = await supabase.auth.getSession();
+        const isAnonymous = Boolean(currentSession?.user?.is_anonymous);
 
-      if (isAnonymous) {
-        // Converting anonymous user to permanent user
-        const { data, error } = await supabase.auth.updateUser(
-          {
-            email: values.email,
-            password: values.password,
-            data: { display_name: values.name },
-          },
-          {
-            emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-            ...(captchaToken ? ({ captchaToken } as { captchaToken: string }) : {}),
-          },
-        );
-        if (error) {
-          const msg = error.message.toLowerCase();
-          if (msg.includes("already registered") || msg.includes("already in use") || msg.includes("unique")) {
-            setFormError(
-              "An account with this email already exists. Sign in with your existing account to claim this interview report.",
-            );
+        if (isAnonymous) {
+          // Converting anonymous user to permanent user
+          const { data, error } = await supabase.auth.updateUser(
+            {
+              email: values.email,
+              password: values.password,
+              data: { display_name: values.name },
+            },
+            {
+              emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+              ...(captchaToken ? ({ captchaToken } as { captchaToken: string }) : {}),
+            },
+          );
+          if (error) {
+            const msg = error.message.toLowerCase();
+            if (msg.includes("already registered") || msg.includes("already in use") || msg.includes("unique")) {
+              setFormError(
+                "An account with this email already exists. Sign in with your existing account to claim this interview report.",
+              );
+            } else {
+              setFormError(authErrorMessage(error.message));
+            }
+            setCaptchaToken(null);
+            setTurnstileKey((k) => k + 1);
+            return;
+          }
+
+          if (data.user && !data.user.email_confirmed_at && !currentSession?.user?.email_confirmed_at) {
+            setSentTo(values.email);
           } else {
-            setFormError(authErrorMessage(error.message));
+            router.replace(next);
+            router.refresh();
           }
           return;
         }
 
-        if (data.user && !data.user.email_confirmed_at && !currentSession?.user?.email_confirmed_at) {
-          setSentTo(values.email);
-        } else {
+        // Normal signup
+        const { data, error } = await supabase.auth.signUp({
+          email: values.email,
+          password: values.password,
+          options: {
+            data: { display_name: values.name },
+            emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+            ...(captchaToken ? { captchaToken } : {}),
+          },
+        });
+        if (error) {
+          setFormError(authErrorMessage(error.message));
+          setCaptchaToken(null);
+          setTurnstileKey((k) => k + 1);
+          return;
+        }
+        if (data.session) {
           router.replace(next);
           router.refresh();
+        } else {
+          setSentTo(values.email);
         }
-        return;
+      } catch (e) {
+        setFormError(e instanceof Error ? e.message : "Couldn't create the account.");
+        setCaptchaToken(null);
+        setTurnstileKey((k) => k + 1);
       }
-
-      // Normal signup
-      const { data, error } = await supabase.auth.signUp({
-        email: values.email,
-        password: values.password,
-        options: {
-          data: { display_name: values.name },
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-          ...(captchaToken ? { captchaToken } : {}),
-        },
-      });
-      if (error) {
-        setFormError(authErrorMessage(error.message));
-        return;
-      }
-      if (data.session) {
-        router.replace(next);
-        router.refresh();
-      } else {
-        setSentTo(values.email);
-      }
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : "Couldn't create the account.");
-    }
-  });
+    })(e);
+  };
 
   if (sentTo) {
     return (
@@ -282,9 +317,26 @@ export function SignUpForm() {
         <FieldError id="confirm-error" message={errors.confirm?.message} />
       </div>
       {env.turnstileSiteKey && (
-        <Turnstile onVerify={setCaptchaToken} onExpire={() => setCaptchaToken(null)} />
+        <div className="flex flex-col items-center gap-1.5">
+          <Turnstile
+            key={turnstileKey}
+            onVerify={(token) => {
+              setCaptchaToken(token);
+              setFormError(null);
+            }}
+            onExpire={() => setCaptchaToken(null)}
+          />
+          {!captchaToken && (
+            <p className="text-xs text-slate">Tick the box above to continue</p>
+          )}
+        </div>
       )}
-      <Button type="submit" className="w-full" loading={isSubmitting}>
+      <Button
+        type="submit"
+        className="w-full"
+        loading={isSubmitting}
+        disabled={isSubmitting || (Boolean(env.turnstileSiteKey) && !captchaToken)}
+      >
         Create account
       </Button>
       <p className="text-center text-sm text-slate">

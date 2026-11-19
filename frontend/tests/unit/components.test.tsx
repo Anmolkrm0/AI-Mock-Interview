@@ -1,10 +1,13 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const feedbackMock = vi.fn(async () => ({ rating: 4 }));
 const listMock = vi.fn();
 const retryEvaluationMock = vi.fn(async () => ({ id: "fail-1" }));
+const mockPush = vi.fn();
+const mockReplace = vi.fn();
+const mockRefresh = vi.fn();
 
 vi.mock("@/services/interviews", () => ({
   interviewsApi: {
@@ -16,7 +19,7 @@ vi.mock("@/services/interviews", () => ({
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard",
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ replace: mockReplace, push: mockPush, refresh: mockRefresh }),
 }));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
@@ -30,15 +33,27 @@ import type { Session, User } from "@supabase/supabase-js";
 const mockGetSession = vi.fn(
   async (): Promise<{ data: { session: Session | null } }> => ({ data: { session: null } }),
 );
+const mockSignInAnonymously = vi.fn<
+  (options?: unknown) => Promise<{
+    data?: { user: User | null; session: Session | null };
+    error: { message: string } | null;
+  }>
+>(async () => ({
+  data: { user: null, session: null },
+  error: null,
+}));
 
 vi.mock("@/lib/supabase/client", () => ({
   getSupabaseBrowser: () => ({
     auth: {
       getUser: async () => ({ data: { user: null } }),
       getSession: () => mockGetSession(),
+      signInAnonymously: (options?: unknown) => mockSignInAnonymously(options),
     },
   }),
 }));
+
+import { env } from "@/lib/env";
 
 import { PhoneNotice } from "@/components/common/phone-notice";
 import { ChoiceGroup } from "@/components/interview/choice-group";
@@ -345,6 +360,22 @@ describe("setup page", () => {
     expect(screen.queryByLabelText(/video and audio/i)).not.toBeInTheDocument();
     expect(screen.getByLabelText(/audio only/i)).toBeInTheDocument();
   });
+
+  it("shows guest notice with 'audio recordings' for anonymous guests", async () => {
+    mockGetSession.mockResolvedValue({
+      data: {
+        session: {
+          user: { is_anonymous: true } as unknown as User,
+          access_token: "tok",
+        } as unknown as Session,
+      },
+    });
+    const { default: SetupPage } = await import("@/app/interview/setup/page");
+    render(<SetupPage />);
+    expect(await screen.findByText(/Create a free account to enable audio recordings\./i)).toBeInTheDocument();
+    expect(screen.queryByText(/audio\/video recordings/i)).not.toBeInTheDocument();
+    mockGetSession.mockResolvedValue({ data: { session: null } });
+  });
 });
 
 describe("AppHeader guest menu", () => {
@@ -422,4 +453,95 @@ describe("SampleQuestionPreview", () => {
     expect(screen.getByText("Strong and well-supported")).toBeInTheDocument();
   });
 });
+
+describe("StartInterviewButton", () => {
+  const originalTurnstileSiteKey = env.turnstileSiteKey;
+
+  beforeEach(() => {
+    mockPush.mockReset();
+    mockSignInAnonymously.mockReset();
+    mockSignInAnonymously.mockResolvedValue({ data: { user: null, session: null }, error: null });
+  });
+
+  afterEach(() => {
+    (env as { turnstileSiteKey: string }).turnstileSiteKey = originalTurnstileSiteKey;
+  });
+
+  it("is disabled when turnstile site key is set and no token exists, showing hint", async () => {
+    (env as { turnstileSiteKey: string }).turnstileSiteKey = "site-key-123";
+    const { StartInterviewButton } = await import("@/components/common/start-interview-button");
+    render(<StartInterviewButton />);
+
+    const button = screen.getByRole("button", { name: /start an interview/i });
+    expect(button).toBeDisabled();
+    expect(screen.getByText("Tick the box above to start")).toBeInTheDocument();
+  });
+
+  it("does not navigate and shows error when signInAnonymously returns an error", async () => {
+    (env as { turnstileSiteKey: string }).turnstileSiteKey = "site-key-123";
+    let verifyCallback: ((t: string) => void) | undefined;
+    const resetSpy = vi.fn();
+
+    window.turnstile = {
+      render: (_container: HTMLElement, opts: { callback: (t: string) => void }) => {
+        verifyCallback = opts.callback;
+        return "widget-1";
+      },
+      reset: resetSpy,
+      remove: vi.fn(),
+    };
+
+    const { StartInterviewButton } = await import("@/components/common/start-interview-button");
+    render(<StartInterviewButton />);
+
+    const button = screen.getByRole("button", { name: /start an interview/i });
+    expect(button).toBeDisabled();
+
+    // Verify turnstile token
+    expect(verifyCallback).toBeDefined();
+    verifyCallback!("valid-token");
+
+    await waitFor(() => {
+      expect(button).toBeEnabled();
+      expect(screen.queryByText("Tick the box above to start")).not.toBeInTheDocument();
+    });
+
+    // Mock anonymous sign in failure
+    mockSignInAnonymously.mockResolvedValueOnce({
+      error: { message: "captcha_failed" },
+    });
+
+    await userEvent.click(button);
+
+    // Should NOT navigate
+    expect(mockPush).not.toHaveBeenCalled();
+
+    // Inline error message should be displayed
+    expect(
+      await screen.findByText(
+        "We couldn't start your free interview. Please tick the check again or refresh.",
+      ),
+    ).toBeInTheDocument();
+
+    // Widget reset should have been called and button disabled
+    expect(resetSpy).toHaveBeenCalledWith("widget-1");
+    expect(button).toBeDisabled();
+  });
+
+  it("navigates to /interview/setup on successful start", async () => {
+    (env as { turnstileSiteKey: string }).turnstileSiteKey = "";
+    const { StartInterviewButton } = await import("@/components/common/start-interview-button");
+    render(<StartInterviewButton />);
+
+    const button = screen.getByRole("button", { name: /start an interview/i });
+    expect(button).toBeEnabled();
+
+    await userEvent.click(button);
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/interview/setup");
+    });
+  });
+});
+
 
