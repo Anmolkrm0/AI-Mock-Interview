@@ -1402,4 +1402,3 @@ async def test_delete_account(client) -> None:
     # 3. Verify interview and profile are deleted
     r = await client.get(f"/api/v1/interviews/{iid}", headers=auth(user))
     assert r.status_code == 404
-

@@ -56,6 +56,9 @@ class Profile(Base):
     __tablename__ = "profiles"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     display_name: Mapped[str | None] = mapped_column(Text)
+    is_anonymous: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()
 
@@ -134,6 +137,9 @@ class Interview(Base):
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     evaluation_rigor: Mapped[str] = mapped_column(String(16), nullable=False)
     recording_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="none")
+    is_guest: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="created")
     failure_stage: Mapped[str | None] = mapped_column(String(32))
     failure_code: Mapped[str | None] = mapped_column(String(64))
@@ -386,4 +392,13 @@ class AIUsage(Base):
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     success: Mapped[bool] = mapped_column(Boolean, nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = _created()
+
+
+class GuestConversion(Base):
+    __tablename__ = "guest_conversions"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    conversion_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    guest_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    registered_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     created_at: Mapped[datetime] = _created()

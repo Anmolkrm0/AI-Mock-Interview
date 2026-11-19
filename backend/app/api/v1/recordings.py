@@ -5,7 +5,7 @@ import uuid
 from fastapi import APIRouter, Response
 
 from app.api.deps import DB, CurrentUser, SettingsDep, Storage
-from app.core.errors import NotFound
+from app.core.errors import Forbidden, NotFound
 from app.models import Recording
 from app.schemas.recordings import (
     ConfirmIn,
@@ -33,6 +33,8 @@ def _out(r: Recording) -> RecordingOut:
 async def upload_url(
     body: UploadUrlIn, user: CurrentUser, db: DB, settings: SettingsDep, storage: Storage
 ) -> UploadUrlOut:
+    if user.is_anonymous:
+        raise Forbidden("Recordings are not available for guest sessions.", code="RECORDINGS_NOT_ALLOWED")
     upload, signed = await recording_service.issue_upload(db, storage, settings, user_id=user.id, body=body)
     return UploadUrlOut(
         upload_id=upload.id,
@@ -48,6 +50,8 @@ async def upload_url(
 async def confirm(
     body: ConfirmIn, user: CurrentUser, db: DB, settings: SettingsDep, storage: Storage
 ) -> RecordingOut:
+    if user.is_anonymous:
+        raise Forbidden("Recordings are not available for guest sessions.", code="RECORDINGS_NOT_ALLOWED")
     recording = await recording_service.confirm_upload(
         db, storage, settings, user_id=user.id, upload_id=body.upload_id
     )
@@ -56,6 +60,8 @@ async def confirm(
 
 @router.get("/recordings/latest", response_model=RecordingOut)
 async def latest(user: CurrentUser, db: DB) -> RecordingOut:
+    if user.is_anonymous:
+        raise Forbidden("Recordings are not available for guest sessions.", code="RECORDINGS_NOT_ALLOWED")
     current = await db.get(Recording, user.id)
     if current is None:
         raise NotFound("You don't have a stored recording.", code="RECORDING_NOT_FOUND")
@@ -64,6 +70,8 @@ async def latest(user: CurrentUser, db: DB) -> RecordingOut:
 
 @router.delete("/recordings/latest", status_code=204)
 async def delete_latest(user: CurrentUser, db: DB, settings: SettingsDep, storage: Storage) -> Response:
+    if user.is_anonymous:
+        raise Forbidden("Recordings are not available for guest sessions.", code="RECORDINGS_NOT_ALLOWED")
     deleted = await recording_service.delete_current(db, storage, settings, user_id=user.id)
     if not deleted:
         raise NotFound("You don't have a stored recording.", code="RECORDING_NOT_FOUND")
@@ -74,6 +82,8 @@ async def delete_latest(user: CurrentUser, db: DB, settings: SettingsDep, storag
 async def recording_url(
     interview_id: uuid.UUID, user: CurrentUser, db: DB, settings: SettingsDep, storage: Storage
 ) -> PlaybackOut:
+    if user.is_anonymous:
+        raise Forbidden("Recordings are not available for guest sessions.", code="RECORDINGS_NOT_ALLOWED")
     url, rec = await recording_service.playback_url(
         db, storage, settings, user_id=user.id, interview_id=interview_id
     )

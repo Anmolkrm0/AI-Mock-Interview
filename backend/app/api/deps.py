@@ -83,6 +83,9 @@ async def require_admin(
     user: CurrentUser,
     settings: SettingsDep,
 ) -> AuthenticatedUser:
+    if user.is_anonymous:
+        raise NotFound()
+
     email = (
         (user.email or (user.claims.get("email") if isinstance(user.claims, dict) else None) or "")
         .strip()

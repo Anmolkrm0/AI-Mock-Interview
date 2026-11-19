@@ -63,10 +63,21 @@ async def get_overview(
     user_stats_sql = """
         SELECT
             count(*) AS total,
-            count(*) FILTER (WHERE created_at >= now() - (:days * interval '1 day')) AS new_in_range
+            count(*) FILTER (WHERE created_at >= now() - (:days * interval '1 day')) AS new_in_range,
+            count(*) FILTER (WHERE is_anonymous = true) AS guest_users,
+            count(*) FILTER (WHERE is_anonymous = false) AS registered_users
         FROM profiles
     """
     u_res = (await db.execute(text(user_stats_sql), params)).mappings().one()
+
+    conv_sql = """
+        SELECT
+            count(*) AS total,
+            count(*) FILTER (WHERE conversion_type = 'claim') AS claims,
+            count(*) FILTER (WHERE conversion_type = 'signup') AS signups
+        FROM guest_conversions
+    """
+    conv_res = (await db.execute(text(conv_sql))).mappings().one()
 
     # Active users (created interview or emitted event in window)
     active_24h_sql = """
@@ -108,6 +119,11 @@ async def get_overview(
         active_24h=active_24h,
         active_7d=active_7d,
         active_30d=active_30d,
+        guest_users=int(u_res["guest_users"] or 0),
+        registered_users=int(u_res["registered_users"] or 0),
+        guest_to_registered_conversions=int(conv_res["total"] or 0),
+        claims=int(conv_res["claims"] or 0),
+        update_user_conversions=int(conv_res["signups"] or 0),
     )
 
     # 2. Interviews stats
@@ -118,6 +134,8 @@ async def get_overview(
             count(*) FILTER (WHERE status = 'completed') AS completed,
             count(*) FILTER (WHERE status = 'cancelled') AS cancelled,
             count(*) FILTER (WHERE status = 'failed') AS failed,
+            count(*) FILTER (WHERE is_guest = true) AS guest_interviews,
+            count(*) FILTER (WHERE is_guest = false) AS registered_interviews,
             coalesce(round(avg(duration_minutes)::numeric, 1), 0.0) AS avg_duration
         FROM interviews
         WHERE created_at >= now() - (:days * interval '1 day')
@@ -137,6 +155,8 @@ async def get_overview(
         cancelled=cancelled_cnt,
         failed=failed_cnt,
         completion_rate=completion_rate,
+        guest_interviews=int(i_res["guest_interviews"] or 0),
+        registered_interviews=int(i_res["registered_interviews"] or 0),
     )
 
     # 3. Averages

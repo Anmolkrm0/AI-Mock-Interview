@@ -16,6 +16,7 @@ import { Input, Label, Textarea } from "@/components/ui/field";
 import { ApiError, errorMessage, pingBackend } from "@/lib/api";
 import { env } from "@/lib/env";
 import { planRecording } from "@/lib/media/recording-budget";
+import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { cn, formatBytes, newId } from "@/lib/utils";
 import { MAX_JD_CHARS, setupSchema, validateJobText } from "@/lib/validation";
 import { documentsApi, interviewsApi } from "@/services/interviews";
@@ -101,6 +102,7 @@ export default function SetupPage() {
   const [duration, setDuration] = useState<Duration>(20);
   const [rigor, setRigor] = useState<Rigor>("standard");
   const [recordingMode, setRecordingMode] = useState<RecordingMode>("audio");
+  const [isGuest, setIsGuest] = useState(false);
   const [consent, setConsent] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -132,6 +134,24 @@ export default function SetupPage() {
       /* ignore corrupt storage */
     }
     void pingBackend(60_000);
+    const auth = getSupabaseBrowser()?.auth;
+    if (typeof auth?.getSession === "function") {
+      void auth.getSession().then(({ data }) => {
+        if (data?.session?.user?.is_anonymous) {
+          setIsGuest(true);
+          setDuration(10);
+          setRecordingMode("none");
+        }
+      });
+    } else if (typeof auth?.getUser === "function") {
+      void auth.getUser().then(({ data }) => {
+        if (data?.user?.is_anonymous) {
+          setIsGuest(true);
+          setDuration(10);
+          setRecordingMode("none");
+        }
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -216,11 +236,13 @@ export default function SetupPage() {
 
   async function start() {
     setStartError(null);
+    const effDuration = isGuest ? (10 as Duration) : duration;
+    const effRecordingMode = isGuest ? ("none" as RecordingMode) : recordingMode;
     const parsed = setupSchema.safeParse({
       jobRole: chosenRole ?? "",
-      duration,
+      duration: effDuration,
       rigor,
-      recordingMode,
+      recordingMode: effRecordingMode,
       consent,
     });
     const errors: Record<string, string> = {};
@@ -229,7 +251,7 @@ export default function SetupPage() {
     if (!parsed.success) {
       for (const issue of parsed.error.issues) errors[String(issue.path[0])] = issue.message;
     }
-    if (recordingMode !== "none" && !plan.fits) {
+    if (effRecordingMode !== "none" && !plan.fits) {
       errors.recordingMode = "This recording won't fit the storage limit. Choose audio only or no recording.";
     }
     setFieldErrors(errors);
@@ -244,9 +266,9 @@ export default function SetupPage() {
             resume_document_id: resume.id,
             job_description_document_id: job.id,
             job_role: chosenRole,
-            duration_minutes: duration,
+            duration_minutes: effDuration,
             evaluation_rigor: rigor,
-            recording_mode: recordingMode,
+            recording_mode: effRecordingMode,
             consent_given: true,
           },
           idemKey.current,
@@ -474,14 +496,23 @@ export default function SetupPage() {
 
           <Step n={4} title="Length and pressure" done={roleDone} locked={!roleDone}>
             <div className={cn("space-y-8", locked && "pointer-events-none")}>
-              <ChoiceGroup<Duration>
-                name="duration"
-                legend="Interview length"
-                columns={4}
-                value={duration}
-                onChange={setDuration}
-                choices={[10, 20, 30, 45].map((d) => ({ value: d as Duration, label: `${d} minutes` }))}
-              />
+              {isGuest ? (
+                <div className="rounded-md border border-line bg-surface p-4">
+                  <p className="text-sm font-medium text-ink">Length: 10 minutes (Guest session)</p>
+                  <p className="mt-1 text-xs text-slate">
+                    Guest interviews are fixed at 10 minutes. Create a free account to unlock 20, 30, and 45-minute interviews.
+                  </p>
+                </div>
+              ) : (
+                <ChoiceGroup<Duration>
+                  name="duration"
+                  legend="Interview length"
+                  columns={4}
+                  value={duration}
+                  onChange={setDuration}
+                  choices={[10, 20, 30, 45].map((d) => ({ value: d as Duration, label: `${d} minutes` }))}
+                />
+              )}
               <ChoiceGroup<Rigor>
                 name="rigor"
                 legend="How hard should the interviewer push?"
@@ -511,20 +542,26 @@ export default function SetupPage() {
 
           <Step n={5} title="Recording and consent" done={consent} locked={!roleDone}>
             <div className={cn("space-y-6", locked && "pointer-events-none")}>
-              <ChoiceGroup<RecordingMode>
-                name="recording"
-                legend="Save a recording you can replay?"
-                columns={3}
-                value={recordingMode}
-                onChange={setRecordingMode}
-                error={fieldErrors.recordingMode}
-                choices={[
-                  { value: "audio", label: "Audio only", description: "Smallest file." },
-                  { value: "video", label: "Video and audio", description: "Uses your camera." },
-                  { value: "none", label: "Don't record", description: "Transcript only." },
-                ]}
-              />
-              {recordingMode !== "none" && (
+              {isGuest ? (
+                <Notice tone="info">
+                  Recordings are not saved for guest sessions. Your interview answers are transcribed and evaluated. Create a free account to enable audio/video recordings.
+                </Notice>
+              ) : (
+                <ChoiceGroup<RecordingMode>
+                  name="recording"
+                  legend="Save a recording you can replay?"
+                  columns={3}
+                  value={recordingMode}
+                  onChange={setRecordingMode}
+                  error={fieldErrors.recordingMode}
+                  choices={[
+                    { value: "audio", label: "Audio only", description: "Smallest file." },
+                    { value: "video", label: "Video and audio", description: "Uses your camera." },
+                    { value: "none", label: "Don't record", description: "Transcript only." },
+                  ]}
+                />
+              )}
+              {!isGuest && recordingMode !== "none" && (
                 <Notice tone={plan.fits && plan.quality !== "low" ? "info" : "warning"}>
                   Estimated size about {formatBytes(plan.estimatedBytes)} (limit {formatBytes(env.recordingMaxBytes)}).
                   {recordingMode === "video" &&

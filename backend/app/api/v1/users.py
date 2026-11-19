@@ -64,11 +64,7 @@ async def delete_account(
         )
 
     uploads = list(
-        (
-            await db.execute(
-                select(RecordingUpload).where(RecordingUpload.user_id == user.id)
-            )
-        ).scalars()
+        (await db.execute(select(RecordingUpload).where(RecordingUpload.user_id == user.id))).scalars()
     )
     for upload in uploads:
         if upload.storage_path:
@@ -81,13 +77,7 @@ async def delete_account(
             )
 
     # 3. Queue storage cleanup for all user documents
-    docs = list(
-        (
-            await db.execute(
-                select(Document).where(Document.user_id == user.id)
-            )
-        ).scalars()
-    )
+    docs = list((await db.execute(select(Document).where(Document.user_id == user.id))).scalars())
     for doc in docs:
         if doc.storage_path:
             db.add(
@@ -99,19 +89,15 @@ async def delete_account(
             )
 
     # 4. Delete all user interviews and child rows
-    interviews = list(
-        (
-            await db.execute(
-                select(Interview).where(Interview.user_id == user.id)
-            )
-        ).scalars()
-    )
+    interviews = list((await db.execute(select(Interview).where(Interview.user_id == user.id))).scalars())
     for inv in interviews:
         await db.execute(delete(EvaluationJob).where(EvaluationJob.interview_id == inv.id))
         await db.execute(delete(Feedback).where(Feedback.interview_id == inv.id))
         await db.execute(delete(Report).where(Report.interview_id == inv.id))
         await db.execute(delete(InterviewEvent).where(InterviewEvent.interview_id == inv.id))
-        questions = list((await db.execute(select(Question).where(Question.interview_id == inv.id))).scalars())
+        questions = list(
+            (await db.execute(select(Question).where(Question.interview_id == inv.id))).scalars()
+        )
         for q in questions:
             await db.execute(delete(AnswerAttempt).where(AnswerAttempt.question_id == q.id))
             await db.delete(q)

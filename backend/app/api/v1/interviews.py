@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.api.deps import DB, CurrentUser, Providers, SettingsDep, limit_ai
-from app.core.errors import Conflict, NotFound
+from app.core.errors import Conflict, Forbidden, NotFound
 from app.models import (
     AnswerAttempt,
     Document,
@@ -61,7 +61,12 @@ async def create_interview(
 
         raise not_configured("The AI provider", "GEMINI_API_KEY")
     interview, created = await interview_service.create_interview(
-        db, user_id=user.id, payload=body, idempotency_key=idempotency_key, settings=settings
+        db,
+        user_id=user.id,
+        payload=body,
+        idempotency_key=idempotency_key,
+        settings=settings,
+        is_anonymous=user.is_anonymous,
     )
     if not created:
         response.status_code = 200
@@ -91,6 +96,12 @@ async def list_interviews(
     limit: int = Query(default=20, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
 ) -> InterviewPage:
+    if user.is_anonymous:
+        if offset > 0:
+            raise Forbidden(
+                "Guests cannot list interviews beyond their single session.", code="GUEST_LIST_LIMIT"
+            )
+        limit = 1
     total = (
         await db.execute(
             select(func.count())
@@ -286,6 +297,20 @@ async def status(interview_id: uuid.UUID, user: CurrentUser, db: DB) -> StatusOu
     )
 
 
+def _score_to_label(score: float | None) -> str | None:
+    if score is None:
+        return None
+    if score >= 85:
+        return "Excellent"
+    if score >= 70:
+        return "Strong"
+    if score >= 55:
+        return "Competent"
+    if score >= 40:
+        return "Developing"
+    return "Needs Improvement"
+
+
 @router.get("/{interview_id}/report", response_model=ReportOut)
 async def get_report(interview_id: uuid.UUID, user: CurrentUser, db: DB) -> ReportOut:
     interview = await get_owned_interview(db, user.id, interview_id)
@@ -294,6 +319,50 @@ async def get_report(interview_id: uuid.UUID, user: CurrentUser, db: DB) -> Repo
     ).scalar_one_or_none()
     if report is None:
         raise NotFound("No report exists for this interview yet.", code="REPORT_NOT_FOUND")
+
+    # Find ONE highlighted evidence quote
+    highlighted_quote = None
+    for qe in report.question_evaluations or []:
+        evs = qe.get("evidence", []) if isinstance(qe, dict) else getattr(qe, "evidence", [])
+        if evs and len(evs) > 0:
+            first = evs[0]
+            if isinstance(first, dict):
+                highlighted_quote = {
+                    "quote": first.get("quote"),
+                    "supports": first.get("supports"),
+                }
+            else:
+                highlighted_quote = {
+                    "quote": getattr(first, "quote", ""),
+                    "supports": getattr(first, "supports", ""),
+                }
+            break
+
+    label = _score_to_label(report.overall_score)
+
+    if user.is_anonymous:
+        return ReportOut(
+            interview_id=interview.id,
+            report_status=report.report_status,
+            overall_score=report.overall_score,
+            overall_label=label,
+            highlighted_quote=highlighted_quote,
+            locked=True,
+            evidence_sufficiency=None,
+            competency_scores=[],
+            question_evaluations=[],
+            strengths=[],
+            improvement_areas=[],
+            recommendations=[],
+            summary=None,
+            unevaluated_questions=[],
+            job_role=interview.job_role,
+            evaluation_rigor=interview.evaluation_rigor,
+            duration_minutes=interview.duration_minutes,
+            created_at=report.created_at,
+            feedback=None,
+        )
+
     feedback = (
         await db.execute(
             select(Feedback).where(Feedback.interview_id == interview.id, Feedback.user_id == user.id)
@@ -303,6 +372,9 @@ async def get_report(interview_id: uuid.UUID, user: CurrentUser, db: DB) -> Repo
         interview_id=interview.id,
         report_status=report.report_status,
         overall_score=report.overall_score,
+        overall_label=label,
+        highlighted_quote=highlighted_quote,
+        locked=False,
         evidence_sufficiency=report.evidence_sufficiency,
         competency_scores=report.competency_scores,
         question_evaluations=report.question_evaluations,
@@ -323,6 +395,8 @@ async def get_report(interview_id: uuid.UUID, user: CurrentUser, db: DB) -> Repo
 async def submit_feedback(
     interview_id: uuid.UUID, body: FeedbackIn, user: CurrentUser, db: DB
 ) -> FeedbackOut:
+    if user.is_anonymous:
+        raise Forbidden("Guest sessions cannot submit feedback.", code="GUEST_FEEDBACK_FORBIDDEN")
     interview = await get_owned_interview(db, user.id, interview_id)
     comments = (body.comments or "").strip() or None
     await db.execute(
@@ -349,6 +423,11 @@ async def delete_interview(
     db: DB,
     settings: SettingsDep,
 ) -> Response:
+    if user.is_anonymous:
+        raise Forbidden(
+            "Guest interviews cannot be deleted. Create a free account to manage interviews.",
+            code="guest_limit",
+        )
     interview = await get_owned_interview(db, user.id, interview_id, for_update=True)
     if interview.status in interview_service.LIVE_STATES:
         raise Conflict(
@@ -374,9 +453,7 @@ async def delete_interview(
     # 2. Recording uploads
     uploads = list(
         (
-            await db.execute(
-                select(RecordingUpload).where(RecordingUpload.interview_id == interview.id)
-            )
+            await db.execute(select(RecordingUpload).where(RecordingUpload.interview_id == interview.id))
         ).scalars()
     )
     for upload in uploads:
@@ -391,7 +468,9 @@ async def delete_interview(
         await db.delete(upload)
 
     # 3. Documents
-    doc_ids = [d for d in (interview.resume_document_id, interview.job_description_document_id) if d is not None]
+    doc_ids = [
+        d for d in (interview.resume_document_id, interview.job_description_document_id) if d is not None
+    ]
     for doc_id in doc_ids:
         doc = await db.get(Document, doc_id)
         if doc:
@@ -401,7 +480,8 @@ async def delete_interview(
                     .select_from(Interview)
                     .where(
                         Interview.id != interview.id,
-                        (Interview.resume_document_id == doc_id) | (Interview.job_description_document_id == doc_id),
+                        (Interview.resume_document_id == doc_id)
+                        | (Interview.job_description_document_id == doc_id),
                     )
                 )
             ).scalar_one()
@@ -424,7 +504,9 @@ async def delete_interview(
 
     await db.execute(delete(InterviewEvent).where(InterviewEvent.interview_id == interview.id))
 
-    questions = list((await db.execute(select(Question).where(Question.interview_id == interview.id))).scalars())
+    questions = list(
+        (await db.execute(select(Question).where(Question.interview_id == interview.id))).scalars()
+    )
     for q in questions:
         await db.execute(delete(AnswerAttempt).where(AnswerAttempt.question_id == q.id))
         await db.delete(q)
@@ -434,4 +516,3 @@ async def delete_interview(
     await db.delete(interview)
     await db.commit()
     return Response(status_code=204)
-

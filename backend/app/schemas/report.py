@@ -51,6 +51,9 @@ class ReportOut(BaseModel):
     interview_id: uuid.UUID
     report_status: str
     overall_score: float | None
+    overall_label: str | None = None
+    highlighted_quote: dict[str, Any] | None = None
+    locked: bool = False
     evidence_sufficiency: str | None
     competency_scores: list[dict[str, Any]]
     question_evaluations: list[dict[str, Any]]

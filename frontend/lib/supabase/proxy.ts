@@ -33,6 +33,7 @@ export async function updateSession(request: NextRequest) {
   // getClaims() validates the JWT (signature checked against the project's keys).
   const { data } = await supabase.auth.getClaims();
   const signedIn = Boolean(data?.claims?.sub);
+  const isAnonymous = Boolean(data?.claims?.is_anonymous);
   const path = request.nextUrl.pathname;
 
   if (!signedIn && PROTECTED.some((p) => path === p || path.startsWith(`${p}/`))) {
@@ -41,7 +42,21 @@ export async function updateSession(request: NextRequest) {
     url.search = `?next=${encodeURIComponent(path + request.nextUrl.search)}`;
     return NextResponse.redirect(url);
   }
-  if (signedIn && AUTH_PAGES.includes(path)) {
+
+  // Anonymous sessions: may open /interview/* only.
+  // /dashboard, /settings and /admin require a non-anonymous session.
+  if (signedIn && isAnonymous) {
+    const requiresRegistered = ["/dashboard", "/settings", "/admin"];
+    if (requiresRegistered.some((p) => path === p || path.startsWith(`${p}/`))) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/signup";
+      url.search = `?next=${encodeURIComponent(path + request.nextUrl.search)}`;
+      return NextResponse.redirect(url);
+    }
+    return response;
+  }
+
+  if (signedIn && !isAnonymous && AUTH_PAGES.includes(path)) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     url.search = "";

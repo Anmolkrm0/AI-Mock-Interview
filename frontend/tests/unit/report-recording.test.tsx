@@ -99,4 +99,68 @@ describe("Report page recording and delete", () => {
 
     expect(deleteMock).toHaveBeenCalledWith("test-int-1");
   });
+
+  it("Shows Download PDF button for permanent users and calls window.print", async () => {
+    const printSpy = vi.spyOn(window, "print").mockImplementation(() => {});
+    recordingUrlMock.mockRejectedValue(new Error("Not found"));
+    render(<ReportPage />);
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: /download pdf/i })[0]).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getAllByRole("button", { name: /download pdf/i })[0]!);
+    expect(printSpy).toHaveBeenCalled();
+    printSpy.mockRestore();
+  });
+
+  it("When report is locked for guests, shows preview with score, label, highlighted quote, and locked panel with signup/login buttons, and hides Download PDF", async () => {
+    reportMock.mockResolvedValue({
+      id: "test-rep-guest",
+      interview_id: "test-int-guest",
+      overall_score: 72,
+      overall_label: "Strong",
+      highlighted_quote: {
+        quote: "I architected the database partitioning strategy.",
+        supports: "Demonstrates deep system design competency.",
+      },
+      locked: true,
+      report_status: "completed",
+      evidence_sufficiency: null,
+      competency_scores: [],
+      question_evaluations: [],
+      strengths: [],
+      improvement_areas: [],
+      recommendations: [],
+      summary: null,
+      unevaluated_questions: [],
+      job_role: "System Architect",
+      evaluation_rigor: "standard",
+      duration_minutes: 10,
+      created_at: new Date().toISOString(),
+      rubric: {},
+      feedback: null,
+    });
+
+    render(<ReportPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Unlock your full interview analysis")).toBeInTheDocument();
+    });
+
+    // Score and label are visible in preview
+    expect(screen.getByText("72")).toBeInTheDocument();
+    expect(screen.getByText("Strong")).toBeInTheDocument();
+
+    // Highlighted quote is visible
+    expect(screen.getByText(/I architected the database partitioning strategy/i)).toBeInTheDocument();
+    expect(screen.getByText(/Demonstrates deep system design competency/i)).toBeInTheDocument();
+
+    // Locked panel buttons
+    expect(screen.getByRole("link", { name: /create a free account/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /i already have an account/i })).toBeInTheDocument();
+
+    // PDF download is hidden for guests
+    expect(screen.queryByRole("button", { name: /download pdf/i })).not.toBeInTheDocument();
+  });
 });

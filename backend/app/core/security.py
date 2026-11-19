@@ -34,6 +34,7 @@ class AuthenticatedUser:
     id: uuid.UUID
     email: str | None
     claims: dict[str, Any]
+    is_anonymous: bool = False
 
 
 class TokenVerifier:
@@ -109,4 +110,10 @@ class TokenVerifier:
             raise Unauthorized("Your session is invalid. Sign in again.", code="AUTH_INVALID") from exc
         if claims.get("exp", 0) < time.time() - 30:
             raise Unauthorized("Your session has expired. Sign in again.", code="AUTH_EXPIRED")
-        return AuthenticatedUser(id=user_id, email=claims.get("email"), claims=claims)
+        is_anonymous = bool(claims.get("is_anonymous", False))
+        return AuthenticatedUser(
+            id=user_id,
+            email=claims.get("email"),
+            claims=claims,
+            is_anonymous=is_anonymous,
+        )

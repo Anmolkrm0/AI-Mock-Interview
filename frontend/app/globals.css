@@ -107,3 +107,33 @@ dialog::backdrop {
     animation-duration: 0.01ms !important;
   }
 }
+
+@media print {
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+  header,
+  footer,
+  nav,
+  .print\:hidden,
+  button,
+  a[href^="/dashboard"],
+  a[href^="/interview/setup"] {
+    display: none !important;
+  }
+  body {
+    background: #ffffff !important;
+    color: #111827 !important;
+    font-size: 11pt;
+  }
+  main {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

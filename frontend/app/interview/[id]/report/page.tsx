@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ChevronDown, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, Download, Lock, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -277,126 +277,228 @@ export default function ReportPage() {
                     <p className="font-display text-7xl font-semibold leading-none tabular-nums">
                       {Math.round(report.overall_score)}
                     </p>
+                    {report.overall_label && (
+                      <p className="mt-1 font-display text-lg font-medium text-ink">{report.overall_label}</p>
+                    )}
                     <p className="mt-1 text-slate">out of 100, weighted by competency</p>
                   </>
                 ) : (
                   <p className="font-display text-2xl font-semibold">Not scored</p>
                 )}
+                {!report.locked && (
+                  <div className="mt-4 print:hidden">
+                    <Button variant="secondary" onClick={() => window.print()}>
+                      <Download className="mr-2 size-4" /> Download PDF
+                    </Button>
+                  </div>
+                )}
               </div>
             </section>
 
-            {report.evidence_sufficiency && SUFFICIENCY[report.evidence_sufficiency] && (
-              <Notice tone={SUFFICIENCY[report.evidence_sufficiency]!.tone}>
-                {SUFFICIENCY[report.evidence_sufficiency]!.text}
-              </Notice>
+            {report.highlighted_quote && (
+              <div className="rounded-lg border border-line bg-surface p-5 sm:p-6">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate">Highlighted Evidence Quote</p>
+                <blockquote className="mt-2 text-lg italic text-ink">
+                  &ldquo;{report.highlighted_quote.quote}&rdquo;
+                </blockquote>
+                {report.highlighted_quote.supports && (
+                  <p className="mt-2 text-sm text-slate">
+                    <span className="font-medium text-ink">Supports: </span>
+                    {report.highlighted_quote.supports}
+                  </p>
+                )}
+              </div>
             )}
 
-            <section className="grid gap-10 md:grid-cols-2">
-              <div>
-                <h2 className="text-2xl font-semibold">Competencies</h2>
-                <div className="mt-6">
-                  <Competencies items={report.competency_scores} />
+            {report.locked ? (
+              <div className="space-y-10">
+                <div className="relative overflow-hidden rounded-xl border border-line bg-surface p-6 sm:p-10">
+                  {/* Visual placeholder with NO real data */}
+                  <div
+                    className="select-none filter blur-sm pointer-events-none opacity-30 space-y-8"
+                    aria-hidden="true"
+                  >
+                    <div className="grid gap-8 md:grid-cols-2">
+                      <div className="space-y-4">
+                        <div className="h-6 w-40 rounded bg-line" />
+                        <div className="h-10 w-full rounded bg-line" />
+                        <div className="h-10 w-full rounded bg-line" />
+                        <div className="h-10 w-full rounded bg-line" />
+                      </div>
+                      <div className="space-y-4">
+                        <div className="h-6 w-40 rounded bg-line" />
+                        <div className="h-4 w-full rounded bg-line" />
+                        <div className="h-4 w-5/6 rounded bg-line" />
+                        <div className="h-4 w-4/6 rounded bg-line" />
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="h-6 w-48 rounded bg-line" />
+                      <div className="h-28 w-full rounded bg-line" />
+                      <div className="h-28 w-full rounded bg-line" />
+                    </div>
+                  </div>
+
+                  {/* Overlay CTA */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface/85 p-6 text-center backdrop-blur-[2px]">
+                    <div className="mb-4 flex size-12 items-center justify-center rounded-full border border-line bg-paper shadow-sm">
+                      <Lock className="size-6 text-ink" aria-hidden />
+                    </div>
+                    <h2 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">
+                      Unlock your full interview analysis
+                    </h2>
+                    <p className="mt-3 max-w-md text-slate">
+                      Sign in or create a free account to unlock your full competency breakdown,
+                      question-by-question evaluations, strengths, improvement areas, and tailored recommendations.
+                    </p>
+                    <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                      <Link
+                        href={`/signup?next=${encodeURIComponent(`/interview/${id}/report`)}`}
+                        className={buttonVariants({ size: "lg" })}
+                      >
+                        Create a free account
+                      </Link>
+                      <Link
+                        href={`/login?next=${encodeURIComponent(`/interview/${id}/report`)}`}
+                        className={buttonVariants({ variant: "secondary", size: "lg" })}
+                      >
+                        I already have an account
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-6">
+                  <Link href="/interview/setup" className={buttonVariants()}>
+                    Practise again
+                  </Link>
+                  <Button variant="danger" onClick={() => setConfirmDelete(true)}>
+                    <Trash2 /> Delete interview
+                  </Button>
                 </div>
               </div>
-              <div className="space-y-8">
-                {report.strengths.length > 0 && (
-                  <div>
-                    <h2 className="text-2xl font-semibold">What went well</h2>
-                    <ul className="mt-3 list-disc space-y-1.5 pl-5">
-                      {report.strengths.map((s) => (
-                        <li key={s}>{s}</li>
-                      ))}
-                    </ul>
-                  </div>
+            ) : (
+              <>
+                {report.evidence_sufficiency && SUFFICIENCY[report.evidence_sufficiency] && (
+                  <Notice tone={SUFFICIENCY[report.evidence_sufficiency]!.tone}>
+                    {SUFFICIENCY[report.evidence_sufficiency]!.text}
+                  </Notice>
                 )}
-                {report.improvement_areas.length > 0 && (
+
+                <section className="grid gap-10 md:grid-cols-2">
                   <div>
-                    <h2 className="text-2xl font-semibold">What to work on</h2>
-                    <ul className="mt-3 list-disc space-y-1.5 pl-5">
-                      {report.improvement_areas.map((s) => (
-                        <li key={s}>{s}</li>
-                      ))}
-                    </ul>
+                    <h2 className="text-2xl font-semibold">Competencies</h2>
+                    <div className="mt-6">
+                      <Competencies items={report.competency_scores} />
+                    </div>
                   </div>
+                  <div className="space-y-8">
+                    {report.strengths.length > 0 && (
+                      <div>
+                        <h2 className="text-2xl font-semibold">What went well</h2>
+                        <ul className="mt-3 list-disc space-y-1.5 pl-5">
+                          {report.strengths.map((s) => (
+                            <li key={s}>{s}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {report.improvement_areas.length > 0 && (
+                      <div>
+                        <h2 className="text-2xl font-semibold">What to work on</h2>
+                        <ul className="mt-3 list-disc space-y-1.5 pl-5">
+                          {report.improvement_areas.map((s) => (
+                            <li key={s}>{s}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                {report.recommendations.length > 0 && (
+                  <section className="rounded-lg bg-ink p-6 text-white sm:p-8">
+                    <h2 className="text-2xl font-semibold">Before your next interview</h2>
+                    <ol className="mt-4 list-decimal space-y-2 pl-5 text-white/85">
+                      {report.recommendations.map((r) => (
+                        <li key={r}>{r}</li>
+                      ))}
+                    </ol>
+                  </section>
                 )}
-              </div>
-            </section>
 
-            {report.recommendations.length > 0 && (
-              <section className="rounded-lg bg-ink p-6 text-white sm:p-8">
-                <h2 className="text-2xl font-semibold">Before your next interview</h2>
-                <ol className="mt-4 list-decimal space-y-2 pl-5 text-white/85">
-                  {report.recommendations.map((r) => (
-                    <li key={r}>{r}</li>
-                  ))}
-                </ol>
-              </section>
-            )}
-
-            <section>
-              <h2 className="text-2xl font-semibold">Answer by answer</h2>
-              <p className="mt-2 text-slate">
-                Scored 1 to 5:{" "}
-                {Object.entries(report.rubric || {})
-                  .map(([k, v]) => `${k} ${v.toLowerCase()}`)
-                  .join("; ")}
-                .
-              </p>
-              <p className="mt-2 text-sm text-slate">
-                <span className="font-medium text-ink">How follow-up answers affect your score:</span> The assessor
-                evaluates your full exchange for each question, including follow-up answers. If your initial answer
-                missed expected evidence, clarifying details or adding concrete examples during a follow-up directly
-                improves your competency score.
-              </p>
-              <div className="mt-6 space-y-4">
-                {report.question_evaluations.map((q) => (
-                  <QuestionCard key={q.question_id} q={q} />
-                ))}
-              </div>
-              {report.unevaluated_questions.length > 0 && (
-                <div className="mt-8">
-                  <h3 className="text-lg font-semibold">Not scored</h3>
-                  <p className="mt-1 text-sm text-slate">These don&apos;t count toward your score.</p>
-                  <ul className="mt-3 divide-y divide-line rounded-lg border border-line bg-surface">
-                    {report.unevaluated_questions.map((u) => (
-                      <li key={u.question_id} className="flex flex-wrap items-baseline justify-between gap-2 px-5 py-3">
-                        <span>{u.question_text}</span>
-                        <span className="text-sm text-slate">{REASONS[u.reason] ?? u.reason}</span>
-                      </li>
+                <section>
+                  <h2 className="text-2xl font-semibold">Answer by answer</h2>
+                  <p className="mt-2 text-slate">
+                    Scored 1 to 5:{" "}
+                    {Object.entries(report.rubric || {})
+                      .map(([k, v]) => `${k} ${v.toLowerCase()}`)
+                      .join("; ")}
+                    .
+                  </p>
+                  <p className="mt-2 text-sm text-slate">
+                    <span className="font-medium text-ink">How follow-up answers affect your score:</span> The assessor
+                    evaluates your full exchange for each question, including follow-up answers. If your initial answer
+                    missed expected evidence, clarifying details or adding concrete examples during a follow-up directly
+                    improves your competency score.
+                  </p>
+                  <div className="mt-6 space-y-4">
+                    {report.question_evaluations.map((q) => (
+                      <QuestionCard key={q.question_id} q={q} />
                     ))}
-                  </ul>
-                </div>
-              )}
-            </section>
+                  </div>
+                  {report.unevaluated_questions.length > 0 && (
+                    <div className="mt-8">
+                      <h3 className="text-lg font-semibold">Not scored</h3>
+                      <p className="mt-1 text-sm text-slate">These don&apos;t count toward your score.</p>
+                      <ul className="mt-3 divide-y divide-line rounded-lg border border-line bg-surface">
+                        {report.unevaluated_questions.map((u) => (
+                          <li
+                            key={u.question_id}
+                            className="flex flex-wrap items-baseline justify-between gap-2 px-5 py-3"
+                          >
+                            <span>{u.question_text}</span>
+                            <span className="text-sm text-slate">{REASONS[u.reason] ?? u.reason}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </section>
 
-            <section className="grid gap-10 border-t border-line pt-10 md:grid-cols-2">
-              <div>
-                <h2 className="text-2xl font-semibold">Recording</h2>
-                <div className="mt-4">
-                  <Recording interviewId={id} />
-                </div>
-              </div>
-              <div>
-                <h2 className="text-2xl font-semibold">Was this useful?</h2>
-                <div className="mt-4">
-                  <FeedbackForm interviewId={id} initial={report.feedback} />
-                </div>
-              </div>
-            </section>
+                <section className="grid gap-10 border-t border-line pt-10 md:grid-cols-2 print:hidden">
+                  <div>
+                    <h2 className="text-2xl font-semibold">Recording</h2>
+                    <div className="mt-4">
+                      <Recording interviewId={id} />
+                    </div>
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-semibold">Was this useful?</h2>
+                    <div className="mt-4">
+                      <FeedbackForm interviewId={id} initial={report.feedback} />
+                    </div>
+                  </div>
+                </section>
 
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap gap-3">
-                <Link href="/interview/setup" className={buttonVariants()}>
-                  Practise again
-                </Link>
-                <Link href="/dashboard" className={buttonVariants({ variant: "secondary" })}>
-                  All interviews
-                </Link>
-              </div>
-              <Button variant="danger" onClick={() => setConfirmDelete(true)}>
-                <Trash2 /> Delete interview
-              </Button>
-            </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
+                  <div className="flex flex-wrap gap-3">
+                    <Link href="/interview/setup" className={buttonVariants()}>
+                      Practise again
+                    </Link>
+                    <Link href="/dashboard" className={buttonVariants({ variant: "secondary" })}>
+                      All interviews
+                    </Link>
+                    <Button variant="secondary" onClick={() => window.print()}>
+                      <Download className="mr-2 size-4" /> Download PDF
+                    </Button>
+                  </div>
+                  <Button variant="danger" onClick={() => setConfirmDelete(true)}>
+                    <Trash2 /> Delete interview
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         )}
         {report && report.report_status !== "completed" && (

@@ -45,6 +45,12 @@ class AppError(Exception):
         super().__init__(self.message)
 
 
+class BadRequest(AppError):
+    status_code = 400
+    code = "BAD_REQUEST"
+    message = "Bad request."
+
+
 class ValidationFailed(AppError):
     status_code = 422
     code = "VALIDATION_FAILED"

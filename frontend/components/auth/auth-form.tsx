@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/feedback";
 import { FieldError, Input, Label } from "@/components/ui/field";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
-import { missingConfig } from "@/lib/env";
+import { env, missingConfig } from "@/lib/env";
 import { safeNextPath, signInSchema, signUpSchema, type SignInValues, type SignUpValues } from "@/lib/validation";
 
 function authErrorMessage(message: string): string {
@@ -46,11 +46,36 @@ export function SignInForm() {
   const onSubmit = handleSubmit(async (values) => {
     setFormError(null);
     try {
-      const { error } = await getSupabaseBrowser().auth.signInWithPassword(values);
+      const supabase = getSupabaseBrowser();
+      // Keep anonymous guest access token in memory only
+      const { data: existingSessionData } = await supabase.auth.getSession();
+      const guestToken =
+        existingSessionData.session?.user?.is_anonymous && existingSessionData.session?.access_token
+          ? existingSessionData.session.access_token
+          : null;
+
+      const { data: newAuthData, error } = await supabase.auth.signInWithPassword(values);
       if (error) {
         setFormError(authErrorMessage(error.message));
         return;
       }
+
+      // If an anonymous guest session existed, claim its rows
+      if (guestToken && newAuthData.session?.access_token) {
+        try {
+          await fetch(`${env.apiUrl}/guest/claim`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${newAuthData.session.access_token}`,
+            },
+            body: JSON.stringify({ guest_token: guestToken }),
+          });
+        } catch (err) {
+          console.error("Claim error:", err);
+        }
+      }
+
       router.replace(safeNextPath(params.get("next")));
       router.refresh();
     } catch (e) {
@@ -122,7 +147,47 @@ export function SignUpForm() {
     setFormError(null);
     try {
       const next = safeNextPath(params.get("next"));
-      const { data, error } = await getSupabaseBrowser().auth.signUp({
+      const supabase = getSupabaseBrowser();
+      const {
+        data: { session: currentSession },
+      } = await supabase.auth.getSession();
+      const isAnonymous = Boolean(currentSession?.user?.is_anonymous);
+
+      if (isAnonymous) {
+        // Converting anonymous user to permanent user
+        const { data, error } = await supabase.auth.updateUser(
+          {
+            email: values.email,
+            password: values.password,
+            data: { display_name: values.name },
+          },
+          {
+            emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+          },
+        );
+        if (error) {
+          const msg = error.message.toLowerCase();
+          if (msg.includes("already registered") || msg.includes("already in use") || msg.includes("unique")) {
+            setFormError(
+              "An account with this email already exists. Sign in with your existing account to claim this interview report.",
+            );
+          } else {
+            setFormError(authErrorMessage(error.message));
+          }
+          return;
+        }
+
+        if (data.user && !data.user.email_confirmed_at && !currentSession?.user?.email_confirmed_at) {
+          setSentTo(values.email);
+        } else {
+          router.replace(next);
+          router.refresh();
+        }
+        return;
+      }
+
+      // Normal signup
+      const { data, error } = await supabase.auth.signUp({
         email: values.email,
         password: values.password,
         options: {
@@ -209,7 +274,10 @@ export function SignUpForm() {
       </Button>
       <p className="text-center text-sm text-slate">
         Already have an account?{" "}
-        <Link href="/login" className="font-medium text-ink underline underline-offset-4">
+        <Link
+          href={`/login${params.get("next") ? `?next=${encodeURIComponent(params.get("next")!)}` : ""}`}
+          className="font-medium text-ink underline underline-offset-4"
+        >
           Sign in
         </Link>
       </p>

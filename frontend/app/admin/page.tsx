@@ -269,7 +269,19 @@ function OverviewTab() {
             <p className="mt-2 font-display text-3xl font-semibold tabular-nums text-ink">
               {data.users.total}
             </p>
-            <p className="mt-1 text-xs text-slate">+{data.users.new_in_range} in {days}d</p>
+            <p className="mt-1 text-xs text-slate">
+              {data.users.registered_users ?? data.users.total} registered &bull; {data.users.guest_users ?? 0} guest
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-line bg-surface p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate">Guest Conversions</p>
+            <p className="mt-2 font-display text-3xl font-semibold tabular-nums text-ink">
+              {data.users.guest_to_registered_conversions ?? 0}
+            </p>
+            <p className="mt-1 text-xs text-slate">
+              {data.users.claims ?? 0} claimed &bull; {data.users.update_user_conversions ?? 0} signed up
+            </p>
           </div>
 
           <div className="rounded-lg border border-line bg-surface p-4">
@@ -287,7 +299,9 @@ function OverviewTab() {
             <p className="mt-2 font-display text-3xl font-semibold tabular-nums text-ink">
               {data.interviews.started}
             </p>
-            <p className="mt-1 text-xs text-slate">{data.interviews.created} created</p>
+            <p className="mt-1 text-xs text-slate">
+              {data.interviews.registered_interviews ?? data.interviews.created} reg &bull; {data.interviews.guest_interviews ?? 0} guest
+            </p>
           </div>
 
           <div className="rounded-lg border border-line bg-surface p-4">

@@ -242,6 +242,9 @@ export interface ReportOut {
   interview_id: string;
   report_status: "pending" | "completed" | "failed";
   overall_score: number | null;
+  overall_label?: string | null;
+  highlighted_quote?: { quote: string; supports?: string } | null;
+  locked?: boolean;
   evidence_sufficiency: "sufficient" | "limited" | "insufficient" | null;
   competency_scores: CompetencyScore[];
   question_evaluations: QuestionEvaluation[];
@@ -316,6 +319,11 @@ export interface OverviewUsersOut {
   active_24h: number;
   active_7d: number;
   active_30d: number;
+  guest_users?: number;
+  registered_users?: number;
+  guest_to_registered_conversions?: number;
+  claims?: number;
+  update_user_conversions?: number;
 }
 
 export interface OverviewInterviewsOut {
@@ -325,6 +333,8 @@ export interface OverviewInterviewsOut {
   cancelled: number;
   failed: number;
   completion_rate: number;
+  guest_interviews?: number;
+  registered_interviews?: number;
 }
 
 export interface OverviewAveragesOut {

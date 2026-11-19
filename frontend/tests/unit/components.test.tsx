@@ -26,7 +26,12 @@ vi.mock("next/link", () => ({
   ),
 }));
 vi.mock("@/lib/supabase/client", () => ({
-  getSupabaseBrowser: () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }),
+  getSupabaseBrowser: () => ({
+    auth: {
+      getUser: async () => ({ data: { user: null } }),
+      getSession: async () => ({ data: { session: null } }),
+    },
+  }),
 }));
 
 import { PhoneNotice } from "@/components/common/phone-notice";

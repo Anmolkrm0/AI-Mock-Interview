@@ -21,7 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.core.errors import AppError, Conflict, RateLimited, ValidationFailed
+from app.core.errors import AppError, Conflict, Forbidden, RateLimited, ValidationFailed
 from app.models import (
     AnswerAttempt,
     Document,
@@ -105,6 +105,7 @@ async def create_interview(
     payload: InterviewCreate,
     idempotency_key: str | None,
     settings: Settings,
+    is_anonymous: bool = False,
 ) -> tuple[Interview, bool]:
     """Create an interview once. Returns (interview, created)."""
     if idempotency_key:
@@ -117,6 +118,18 @@ async def create_interview(
         ).scalar_one_or_none()
         if existing:
             return existing, False
+
+    if is_anonymous:
+        total_created = (
+            await db.execute(select(func.count()).select_from(Interview).where(Interview.user_id == user_id))
+        ).scalar_one()
+        if total_created >= 1:
+            raise Forbidden(
+                "Guests are limited to one interview. Create a free account to take more.",
+                code="guest_limit",
+            )
+        payload.duration_minutes = 10
+        payload.recording_mode = "none"
 
     resume = await get_owned_document(db, user_id, payload.resume_document_id)
     job = await get_owned_document(db, user_id, payload.job_description_document_id)
@@ -157,6 +170,7 @@ async def create_interview(
         duration_minutes=payload.duration_minutes,
         evaluation_rigor=payload.evaluation_rigor,
         recording_mode=payload.recording_mode,
+        is_guest=is_anonymous,
         status="created",
         idempotency_key=idempotency_key,
     )

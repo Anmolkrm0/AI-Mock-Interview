@@ -18,6 +18,11 @@ class OverviewUsersOut(BaseModel):
     active_24h: int
     active_7d: int
     active_30d: int
+    guest_users: int = 0
+    registered_users: int = 0
+    guest_to_registered_conversions: int = 0
+    claims: int = 0
+    update_user_conversions: int = 0
 
 
 class OverviewInterviewsOut(BaseModel):
@@ -27,6 +32,8 @@ class OverviewInterviewsOut(BaseModel):
     cancelled: int
     failed: int
     completion_rate: float
+    guest_interviews: int = 0
+    registered_interviews: int = 0
 
 
 class OverviewAveragesOut(BaseModel):

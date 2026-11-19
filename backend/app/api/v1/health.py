@@ -9,7 +9,7 @@ from app.db.session import get_sessionmaker
 
 router = APIRouter(tags=["health"])
 
-EXPECTED_HEAD = "0002"
+EXPECTED_HEAD = "0003"
 
 
 async def _db_state() -> tuple[str, str | None]:

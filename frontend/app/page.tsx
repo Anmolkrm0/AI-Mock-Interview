@@ -2,6 +2,7 @@ import { FileText, Mic, ScrollText, Shield } from "lucide-react";
 import Link from "next/link";
 
 import { SiteHeader } from "@/components/common/site-header";
+import { StartInterviewButton } from "@/components/common/start-interview-button";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -91,14 +92,15 @@ export default function LandingPage() {
               follows up when an answer is thin. Afterwards you see exactly which lines earned each score.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link href="/interview/setup" className={buttonVariants({ size: "lg" })}>
-                Start an interview
-              </Link>
+              <StartInterviewButton size="lg" />
               <Link href="/login" className={buttonVariants({ variant: "secondary", size: "lg" })}>
                 Sign in
               </Link>
             </div>
-            <p className="mt-4 text-sm text-slate">
+            <p className="mt-3 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+              Try a free 10-minute interview — no sign-up needed.
+            </p>
+            <p className="mt-2 text-sm text-slate">
               Needs a microphone and a recent Chrome, Edge or Safari. Camera is optional.
             </p>
           </div>
@@ -195,12 +197,10 @@ export default function LandingPage() {
               ))}
             </dl>
             <div className="mt-12 flex flex-wrap items-center gap-4">
-              <Link
-                href="/interview/setup"
-                className={cn(buttonVariants({ size: "lg" }), "bg-white text-ink hover:bg-paper")}
-              >
-                Start an interview
-              </Link>
+              <StartInterviewButton
+                size="lg"
+                className="bg-white text-ink hover:bg-paper"
+              />
             </div>
           </div>
         </section>
