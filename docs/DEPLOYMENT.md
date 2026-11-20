@@ -106,7 +106,6 @@ every 10–14 minutes. This keeps the backend warm so candidates receive an imme
    - `NEXT_PUBLIC_RECORDING_MAX_BYTES` — `52428800`
    - `NEXT_PUBLIC_ALLOW_VIDEO_RECORDING` — `false` (optional, defaults to false)
    - `NEXT_PUBLIC_TURNSTILE_SITE_KEY` — optional Cloudflare Turnstile site key for bot verification
-   - `NEXT_PUBLIC_SUPPORT_EMAIL` — optional support email displayed on contact and legal pages (defaults to `support@mockinterview.in`)
 5. Click **Deploy site**. Once built, your site will be live at `https://<netlify-site>`.
 
 ---

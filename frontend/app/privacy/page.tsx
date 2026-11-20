@@ -1,6 +1,5 @@
 import { AppHeader } from "@/components/common/app-header";
 import { SiteFooter } from "@/components/common/site-footer";
-import { env } from "@/lib/env";
 
 export const metadata = {
   title: "Privacy Policy | Mock Interview",
@@ -74,11 +73,7 @@ export default function PrivacyPage() {
             <section className="space-y-2">
               <h2 className="text-lg font-semibold text-ink">5. Contact & Deletion Requests</h2>
               <p>
-                To request full deletion of your profile, interviews, and associated data, please contact us at{" "}
-                <a href={`mailto:${env.supportEmail}`} className="font-medium text-ink underline underline-offset-4">
-                  {env.supportEmail}
-                </a>{" "}
-                or via our{" "}
+                To request full deletion of your profile, interviews, and associated data, please send us a message through our{" "}
                 <a href="/contact" className="font-medium text-ink underline underline-offset-4">
                   contact form
                 </a>.

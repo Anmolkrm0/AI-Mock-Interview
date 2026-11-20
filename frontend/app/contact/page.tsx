@@ -1,6 +1,6 @@
 "use client";
 
-import { Mail, Send } from "lucide-react";
+import { Send } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { AppHeader } from "@/components/common/app-header";
@@ -63,24 +63,11 @@ export default function ContactPage() {
               Contact & Support
             </h1>
             <p className="mt-3 text-slate">
-              Have questions, issues with interview credits, or payment feedback? We&apos;re here to help.
+              Questions about interviews, credits or a payment? Send us a message below and we will reply to the email you enter.
             </p>
           </div>
 
           <div className="mt-8 rounded-xl border border-line bg-surface p-6 sm:p-8">
-            <div className="mb-6 flex items-center gap-3 border-b border-line pb-6 text-sm text-slate">
-              <Mail className="size-5 shrink-0 text-ink" />
-              <span>
-                Direct email:{" "}
-                <a
-                  href={`mailto:${env.supportEmail}`}
-                  className="font-medium text-ink underline underline-offset-4 hover:text-ink"
-                >
-                  {env.supportEmail}
-                </a>
-              </span>
-            </div>
-
             {submitted ? (
               <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 p-6 text-center">
                 <h2 className="text-lg font-semibold text-emerald-800 dark:text-emerald-300">

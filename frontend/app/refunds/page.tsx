@@ -1,6 +1,5 @@
 import { AppHeader } from "@/components/common/app-header";
 import { SiteFooter } from "@/components/common/site-footer";
-import { env } from "@/lib/env";
 
 export const metadata = {
   title: "Refund and Cancellation Policy | Mock Interview",
@@ -67,15 +66,11 @@ export default function RefundsPage() {
             <section className="space-y-2">
               <h2 className="text-lg font-semibold text-ink">5. Support & Claim Process</h2>
               <p>
-                To request assistance with an uncredited order or erroneous transaction, please reach out via our{" "}
+                To request assistance with an uncredited order or erroneous transaction, send us a message through our{" "}
                 <a href="/contact" className="font-medium text-ink underline underline-offset-4">
                   contact form
                 </a>{" "}
-                or email us directly at{" "}
-                <a href={`mailto:${env.supportEmail}`} className="font-medium text-ink underline underline-offset-4">
-                  {env.supportEmail}
-                </a>{" "}
-                with your Cashfree Order ID or registered email address.
+                with your Cashfree Order ID and the email address on your account.
               </p>
             </section>
           </div>

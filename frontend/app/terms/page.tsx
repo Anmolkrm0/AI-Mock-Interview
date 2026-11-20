@@ -1,6 +1,5 @@
 import { AppHeader } from "@/components/common/app-header";
 import { SiteFooter } from "@/components/common/site-footer";
-import { env } from "@/lib/env";
 
 export const metadata = {
   title: "Terms of Service | Mock Interview",
@@ -69,11 +68,7 @@ export default function TermsPage() {
             <section className="space-y-2">
               <h2 className="text-lg font-semibold text-ink">6. Contact Information</h2>
               <p>
-                For questions regarding these terms, contact us at{" "}
-                <a href={`mailto:${env.supportEmail}`} className="font-medium text-ink underline underline-offset-4">
-                  {env.supportEmail}
-                </a>{" "}
-                or via our{" "}
+                For questions regarding these terms, send us a message through our{" "}
                 <a href="/contact" className="font-medium text-ink underline underline-offset-4">
                   contact form
                 </a>.

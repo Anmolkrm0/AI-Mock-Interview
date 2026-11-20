@@ -11,7 +11,6 @@ export const env = {
     process.env.NEXT_PUBLIC_ALLOW_VIDEO_RECORDING === "true" ||
     process.env.ALLOW_VIDEO_RECORDING === "true",
   turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "",
-  supportEmail: process.env.NEXT_PUBLIC_SUPPORT_EMAIL ?? "support@mockinterview.in",
 };
 
 export function missingConfig(): string[] {
