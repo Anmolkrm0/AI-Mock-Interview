@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/feedback";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { billingApi } from "@/services/billing";
 import type { BillingPackage, BillingPackagesOut } from "@/types/api";
+import { packageItem, rememberCheckout, track } from "@/lib/analytics";
 
 const DEFAULT_PACKAGES: BillingPackage[] = [
   {
@@ -87,9 +88,15 @@ function PricingContent() {
       .getPackages()
       .then((data: BillingPackagesOut) => {
         if (!active) return;
+        const list = data.packages && data.packages.length > 0 ? data.packages : DEFAULT_PACKAGES;
         if (data.packages && data.packages.length > 0) {
           setPackages(data.packages);
         }
+        track("view_item_list", {
+          item_list_id: "credit_packs",
+          item_list_name: "Credit packs",
+          items: list.map((p, i) => packageItem(p, i)),
+        });
         setPaymentsEnabled(data.payments_enabled);
       })
       .catch(() => {});
@@ -119,6 +126,7 @@ function PricingContent() {
 
   const handleBuy = async (pkg: BillingPackage) => {
     setError(null);
+    track("select_item", { item_list_id: "credit_packs", items: [packageItem(pkg)] });
     if (!isSignedIn || isGuest) {
       router.push(`/signup?next=${encodeURIComponent("/pricing")}`);
       return;
@@ -127,6 +135,8 @@ function PricingContent() {
     try {
       setPurchasingCode(pkg.code);
       const res = await billingApi.createOrder(pkg.code);
+      rememberCheckout(res.order_id, packageItem(pkg));
+      track("begin_checkout", { currency: "INR", value: pkg.price_inr, items: [packageItem(pkg)] });
 
       // Verify Cashfree SDK loaded
       // @ts-expect-error Cashfree SDK global

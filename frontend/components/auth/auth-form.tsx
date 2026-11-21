@@ -13,6 +13,7 @@ import { FieldError, Input, Label } from "@/components/ui/field";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { env, missingConfig } from "@/lib/env";
 import { safeNextPath, signInSchema, signUpSchema, type SignInValues, type SignUpValues } from "@/lib/validation";
+import { track } from "@/lib/analytics";
 
 function authErrorMessage(message: string): string {
   const m = message.toLowerCase();
@@ -70,6 +71,8 @@ export function SignInForm() {
           setTurnstileKey((k) => k + 1);
           return;
         }
+
+        track("login", { method: "email" });
 
         // If an anonymous guest session existed, claim its rows
         if (guestToken && newAuthData.session?.access_token) {
@@ -218,6 +221,7 @@ export function SignUpForm() {
             return;
           }
 
+          track("sign_up", { method: "guest_upgrade" });
           if (data.user && !data.user.email_confirmed_at && !currentSession?.user?.email_confirmed_at) {
             setSentTo(values.email);
           } else {
@@ -243,6 +247,7 @@ export function SignUpForm() {
           setTurnstileKey((k) => k + 1);
           return;
         }
+        track("sign_up", { method: "email" });
         if (data.session) {
           router.replace(next);
           router.refresh();

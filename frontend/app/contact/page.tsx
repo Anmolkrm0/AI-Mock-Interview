@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/field";
 import { env } from "@/lib/env";
 import { contactApi } from "@/services/contact";
+import { track } from "@/lib/analytics";
 
 export default function ContactPage() {
   const [name, setName] = useState("");
@@ -37,6 +38,7 @@ export default function ContactPage() {
         captcha_token: captchaToken,
       });
       setSubmitted(true);
+      track("contact_form_submit");
       setName("");
       setEmail("");
       setMessage("");

@@ -2,7 +2,7 @@ import { AppHeader } from "@/components/common/app-header";
 import { SiteFooter } from "@/components/common/site-footer";
 
 export const metadata = {
-  title: "Privacy Policy | Mock Interview",
+  title: "Privacy Policy",
   description: "Privacy policy for Mock Interview candidates and visitors.",
 };
 
@@ -67,6 +67,7 @@ export default function PrivacyPage() {
                 <li><strong>Google Cloud (Gemini API):</strong> Live conversational speech, question formulation, and rubric scoring.</li>
                 <li><strong>Cashfree Payments:</strong> Secure RBI-licensed payment gateway in India.</li>
                 <li><strong>Cloudflare:</strong> DDoS mitigation and Turnstile bot verification.</li>
+                <li><strong>Google Analytics:</strong> Anonymous usage statistics, such as which pages are visited, interviews started and credit packs bought. We do not send your name, email, resume or interview content to it.</li>
               </ul>
             </section>
 

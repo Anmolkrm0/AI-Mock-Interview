@@ -18,6 +18,7 @@ import { highlightQuotes } from "@/lib/highlight";
 import { cn, formatDate, RIGOR_LABELS } from "@/lib/utils";
 import { interviewsApi } from "@/services/interviews";
 import type { CompetencyScore, QuestionEvaluation, ReportOut } from "@/types/api";
+import { track, trackOnce } from "@/lib/analytics";
 
 const SUFFICIENCY: Record<string, { tone: "info" | "warning"; text: string }> = {
   limited: {
@@ -226,6 +227,12 @@ export default function ReportPage() {
     if (report && report.report_status !== "completed") router.replace(`/interview/${id}/processing`);
   }, [report, id, router]);
 
+  useEffect(() => {
+    if (report && report.report_status === "completed") {
+      trackOnce(`report_${id}_${report.locked ? "preview" : "full"}`, report.locked ? "report_preview_view" : "report_view");
+    }
+  }, [report, id]);
+
   async function handleDelete() {
     setDeleting(true);
     try {
@@ -287,7 +294,7 @@ export default function ReportPage() {
                 )}
                 {!report.locked && (
                   <div className="mt-4 print:hidden">
-                    <Button variant="secondary" onClick={() => window.print()}>
+                    <Button variant="secondary" onClick={() => { track("report_pdf_download"); window.print(); }}>
                       <Download className="mr-2 size-4" /> Download PDF
                     </Button>
                   </div>
@@ -355,12 +362,14 @@ export default function ReportPage() {
                       <Link
                         href={`/signup?next=${encodeURIComponent(`/interview/${id}/report`)}`}
                         className={buttonVariants({ size: "lg" })}
+                        onClick={() => track("unlock_report_click", { action: "create_account" })}
                       >
                         Create a free account
                       </Link>
                       <Link
                         href={`/login?next=${encodeURIComponent(`/interview/${id}/report`)}`}
                         className={buttonVariants({ variant: "secondary", size: "lg" })}
+                        onClick={() => track("unlock_report_click", { action: "sign_in" })}
                       >
                         I already have an account
                       </Link>
@@ -489,7 +498,7 @@ export default function ReportPage() {
                     <Link href="/dashboard" className={buttonVariants({ variant: "secondary" })}>
                       All interviews
                     </Link>
-                    <Button variant="secondary" onClick={() => window.print()}>
+                    <Button variant="secondary" onClick={() => { track("report_pdf_download"); window.print(); }}>
                       <Download className="mr-2 size-4" /> Download PDF
                     </Button>
                   </div>

@@ -2,7 +2,7 @@ import { AppHeader } from "@/components/common/app-header";
 import { SiteFooter } from "@/components/common/site-footer";
 
 export const metadata = {
-  title: "Refund and Cancellation Policy | Mock Interview",
+  title: "Refund and Cancellation Policy",
   description: "Refund and cancellation terms for Mock Interview credits and sessions.",
 };
 

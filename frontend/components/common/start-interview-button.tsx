@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { env } from "@/lib/env";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import { track } from "@/lib/analytics";
 
 interface StartInterviewButtonProps {
   className?: string;
@@ -50,6 +51,7 @@ export function StartInterviewButton({
           return;
         }
       }
+      track("start_interview_click", { guest: !session });
       router.push("/interview/setup");
     } catch (err) {
       console.error(err);

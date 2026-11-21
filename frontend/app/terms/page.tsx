@@ -2,7 +2,7 @@ import { AppHeader } from "@/components/common/app-header";
 import { SiteFooter } from "@/components/common/site-footer";
 
 export const metadata = {
-  title: "Terms of Service | Mock Interview",
+  title: "Terms of Service",
   description: "Terms and conditions for using Mock Interview.",
 };
 

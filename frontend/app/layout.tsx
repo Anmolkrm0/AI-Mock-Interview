@@ -20,9 +20,34 @@ const body = IBM_Plex_Sans({
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://mockinterview-app.netlify.app"),
-  title: { default: "AI Mock Interview", template: "%s · AI Mock Interview" },
+  title: {
+    default: "AI Mock Interview: practise a real spoken interview for free",
+    template: "%s · AI Mock Interview",
+  },
   description:
-    "Practice a spoken interview for the exact job you're applying to, then see which answers held up and why.",
+    "Practise a spoken interview for the exact job you're applying to. An AI interviewer asks questions from your resume and the job description, then shows which answers held up and why. First 10-minute interview free, no sign-up needed.",
+  applicationName: "Mock Interview",
+  keywords: [
+    "AI mock interview",
+    "mock interview practice",
+    "interview preparation",
+    "voice interview practice",
+    "job interview practice India",
+    "interview feedback",
+  ],
+  openGraph: {
+    type: "website",
+    siteName: "Mock Interview",
+    title: "AI Mock Interview: practise out loud, get scored on evidence",
+    description:
+      "A free 10-minute AI mock interview built from your resume and the job description. No sign-up needed.",
+    url: "/",
+    locale: "en_IN",
+  },
+  twitter: { card: "summary_large_image" },
+  ...(process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION
+    ? { verification: { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION } }
+    : {}),
 };
 
 export const viewport: Viewport = { themeColor: "#16213a", width: "device-width", initialScale: 1 };

@@ -31,6 +31,7 @@ import { planRecording } from "@/lib/media/recording-budget";
 import { formatBytes } from "@/lib/utils";
 import { interviewsApi, prefetchLiveToken } from "@/services/interviews";
 import type { InterviewDetail, LiveTokenOut } from "@/types/api";
+import { track } from "@/lib/analytics";
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -473,6 +474,7 @@ function InterviewRoom({ detail }: { detail: InterviewDetail }) {
     if (rec) pendingRecordings.set(detail.id, rec);
     releaseMedia();
     if (reason === "time_expired") toast.info("Time's up. Your interview has been saved.");
+    track("interview_completed", { reason });
     router.push(`/interview/${detail.id}/processing`);
   }
 

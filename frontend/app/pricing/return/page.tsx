@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/feedback";
 import { billingApi } from "@/services/billing";
 import type { OrderConfirmOut } from "@/types/api";
+import { recallCheckout, trackOnce } from "@/lib/analytics";
 
 export default function PricingReturnPage() {
   return (
@@ -50,6 +51,18 @@ function ReturnContent() {
       setError(null);
       const res = await billingApi.confirmOrder(orderId);
       setResult(res);
+      const item = recallCheckout(orderId);
+      if (res.status === "paid") {
+        trackOnce(`purchase_${orderId}`, "purchase", {
+          transaction_id: orderId,
+          currency: "INR",
+          value: item?.price ?? 0,
+          credits: res.credits,
+          ...(item ? { items: [item] } : {}),
+        });
+      } else {
+        trackOnce(`payment_not_completed_${orderId}`, "payment_not_completed", { status: res.status });
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Unable to verify payment status.");
     } finally {

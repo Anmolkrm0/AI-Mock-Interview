@@ -21,6 +21,7 @@ import { cn, formatBytes, newId } from "@/lib/utils";
 import { MAX_JD_CHARS, setupSchema, validateJobText } from "@/lib/validation";
 import { documentsApi, interviewsApi } from "@/services/interviews";
 import type { DocumentOut, Duration, RecordingMode, Rigor, RoleDetection } from "@/types/api";
+import { track } from "@/lib/analytics";
 
 const STORAGE_KEY = "mi-setup-v1";
 
@@ -275,6 +276,7 @@ export default function SetupPage() {
         );
         id = interview.id;
         setCreatedId(id);
+        track("interview_created", { duration_minutes: effDuration, guest: isGuest });
       }
       setStartStage("planning");
       await interviewsApi.plan(id);
@@ -283,6 +285,7 @@ export default function SetupPage() {
     } catch (e) {
       setStartStage("idle");
       if (e instanceof ApiError && (e.status === 402 || e.code === "payment_required")) {
+        track("paywall_view", { from: "interview_setup" });
         router.push("/pricing?reason=payment_required");
         return;
       }
