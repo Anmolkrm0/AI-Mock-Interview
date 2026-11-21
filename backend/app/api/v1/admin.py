@@ -15,7 +15,11 @@ from app.api.deps import DB, AdminUser, SettingsDep
 from app.core.errors import NotFound, ValidationFailed
 from app.models import ContactMessage, CreditLedger, PaymentOrder, Profile
 from app.services import billing_service
+from app.schemas.report import ReportOut
 from app.schemas.admin import (
+    AdminGuestSummaryOut,
+    GuestDailyCount,
+    GuestLabelCount,
     AdminBillingStatsOut,
     AdminContactMessageItem,
     AdminContactMessageListOut,
@@ -619,9 +623,15 @@ async def list_interviews(
     offset: Annotated[int, Query(ge=0)] = 0,
     status: Annotated[str | None, Query()] = None,
     days: Annotated[int | None, Query(ge=1, le=365)] = None,
+    audience: Annotated[str | None, Query(pattern="^(guest|registered)$")] = None,
 ) -> AdminInterviewListOut:
     where_clauses: list[str] = []
     params: dict[str, Any] = {"limit": limit, "offset": offset}
+
+    if audience == "guest":
+        where_clauses.append("i.is_guest = true")
+    elif audience == "registered":
+        where_clauses.append("i.is_guest = false")
 
     if status and status.strip():
         where_clauses.append("i.status = :status")
@@ -661,8 +671,11 @@ async def list_interviews(
             coalesce(q_counts.answered, 0) AS questions_answered,
             coalesce(q_counts.skipped, 0) AS questions_skipped,
             r.overall_score,
-            f.rating AS feedback_rating
+            f.rating AS feedback_rating,
+            i.is_guest,
+            (i.is_guest AND coalesce(p.is_anonymous, true) = false) AS converted
         FROM interviews i
+        LEFT JOIN profiles p ON p.id = i.user_id
         {auth_join}
         LEFT JOIN (
             SELECT
@@ -704,6 +717,8 @@ async def list_interviews(
             questions_skipped=int(row["questions_skipped"]),
             overall_score=float(row["overall_score"]) if row["overall_score"] is not None else None,
             feedback_rating=int(row["feedback_rating"]) if row["feedback_rating"] is not None else None,
+            is_guest=bool(row["is_guest"]),
+            converted=bool(row["converted"]),
         )
         for row in rows
     ]
@@ -1003,3 +1018,135 @@ async def mark_message_handled(
     await db.commit()
     return {"status": "ok", "message_id": str(message_id)}
 
+
+
+_LABELS = ["Excellent", "Strong", "Competent", "Developing", "Needs Improvement"]
+
+
+@router.get("/guests/summary", response_model=AdminGuestSummaryOut)
+async def guest_summary(admin: AdminUser, db: DB, settings: SettingsDep) -> AdminGuestSummaryOut:
+    """Free (no sign-in) interviews: live ones plus the archived outcomes of cleaned-up guests."""
+    kolkata = ZoneInfo("Asia/Kolkata")
+    midnight = datetime.now(kolkata).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+
+    combined = """
+        WITH g AS (
+            SELECT i.id, i.created_at, i.status, r.overall_score,
+                   (coalesce(p.is_anonymous, true) = false) AS converted, false AS archived
+            FROM interviews i
+            LEFT JOIN reports r ON r.interview_id = i.id
+            LEFT JOIN profiles p ON p.id = i.user_id
+            WHERE i.is_guest = true
+            UNION ALL
+            SELECT s.interview_id, s.created_at, s.status, s.overall_score, false, true
+            FROM guest_interview_stats s
+            WHERE NOT EXISTS (SELECT 1 FROM interviews i2 WHERE i2.id = s.interview_id)
+        )
+    """
+    totals = (
+        await db.execute(
+            text(
+                combined
+                + """
+        SELECT
+            count(*) AS total,
+            count(*) FILTER (WHERE created_at >= :midnight) AS today,
+            count(*) FILTER (WHERE status = 'completed') AS completed,
+            count(*) FILTER (WHERE status IN ('failed', 'cancelled')) AS failed_or_cancelled,
+            count(overall_score) AS scored,
+            avg(overall_score) AS avg_score,
+            count(*) FILTER (WHERE converted) AS converted,
+            count(*) FILTER (WHERE archived) AS archived,
+            count(*) FILTER (WHERE overall_score >= 85) AS l_excellent,
+            count(*) FILTER (WHERE overall_score >= 70 AND overall_score < 85) AS l_strong,
+            count(*) FILTER (WHERE overall_score >= 55 AND overall_score < 70) AS l_competent,
+            count(*) FILTER (WHERE overall_score >= 40 AND overall_score < 55) AS l_developing,
+            count(*) FILTER (WHERE overall_score < 40) AS l_needs
+        FROM g
+        """
+            ),
+            {"midnight": midnight},
+        )
+    ).mappings().one()
+
+    daily_rows = (
+        await db.execute(
+            text(
+                combined
+                + """
+        SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD') AS day,
+               count(*) AS interviews,
+               count(*) FILTER (WHERE converted) AS converted
+        FROM g
+        WHERE created_at >= now() - interval '14 days'
+        GROUP BY 1
+        ORDER BY 1
+        """
+            )
+        )
+    ).mappings().all()
+
+    total = int(totals["total"] or 0)
+    converted = int(totals["converted"] or 0)
+    label_counts = [
+        int(totals["l_excellent"] or 0),
+        int(totals["l_strong"] or 0),
+        int(totals["l_competent"] or 0),
+        int(totals["l_developing"] or 0),
+        int(totals["l_needs"] or 0),
+    ]
+    return AdminGuestSummaryOut(
+        total_interviews=total,
+        interviews_today=int(totals["today"] or 0),
+        daily_cap=settings.guest_daily_cap,
+        completed=int(totals["completed"] or 0),
+        failed_or_cancelled=int(totals["failed_or_cancelled"] or 0),
+        scored=int(totals["scored"] or 0),
+        average_score=round(float(totals["avg_score"]), 1) if totals["avg_score"] is not None else None,
+        converted=converted,
+        conversion_rate=round(converted / total * 100, 1) if total else None,
+        archived=int(totals["archived"] or 0),
+        by_label=[GuestLabelCount(label=lbl, count=c) for lbl, c in zip(_LABELS, label_counts, strict=True)],
+        daily=[
+            GuestDailyCount(date=r["day"], interviews=int(r["interviews"]), converted=int(r["converted"]))
+            for r in daily_rows
+        ],
+    )
+
+
+@router.get("/interviews/{interview_id}/report", response_model=ReportOut)
+async def admin_interview_report(interview_id: uuid.UUID, admin: AdminUser, db: DB) -> ReportOut:
+    """Full report of any interview, for admins only (support and quality review)."""
+    from app.api.v1.interviews import _score_to_label
+    from app.models import Feedback, Interview, Report
+
+    interview = (await db.execute(select(Interview).where(Interview.id == interview_id))).scalar_one_or_none()
+    if interview is None:
+        raise NotFound("Interview not found.", code="INTERVIEW_NOT_FOUND")
+    report = (await db.execute(select(Report).where(Report.interview_id == interview.id))).scalar_one_or_none()
+    if report is None:
+        raise NotFound("No report exists for this interview yet.", code="REPORT_NOT_FOUND")
+    feedback = (
+        await db.execute(select(Feedback).where(Feedback.interview_id == interview.id))
+    ).scalar_one_or_none()
+    return ReportOut(
+        interview_id=interview.id,
+        report_status=report.report_status,
+        overall_score=report.overall_score,
+        overall_label=_score_to_label(report.overall_score),
+        highlighted_quote=None,
+        locked=False,
+        evidence_sufficiency=report.evidence_sufficiency,
+        competency_scores=report.competency_scores,
+        question_evaluations=report.question_evaluations,
+        strengths=report.strengths,
+        improvement_areas=report.improvement_areas,
+        recommendations=report.recommendations,
+        summary=report.summary,
+        unevaluated_questions=report.unevaluated_questions,
+        job_role=interview.job_role,
+        evaluation_rigor=interview.evaluation_rigor,
+        duration_minutes=interview.duration_minutes,
+        created_at=report.created_at,
+        feedback={"rating": feedback.rating, "comments": feedback.comments} if feedback else None,
+    )

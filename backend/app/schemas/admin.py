@@ -168,6 +168,8 @@ class AdminInterviewItem(BaseModel):
     questions_skipped: int
     overall_score: float | None = None
     feedback_rating: int | None = None
+    is_guest: bool = False
+    converted: bool = False
 
 
 class AdminInterviewListOut(BaseModel):
@@ -249,3 +251,29 @@ class AdminContactMessageListOut(BaseModel):
     items: list[AdminContactMessageItem]
     total: int
 
+
+
+class GuestLabelCount(BaseModel):
+    label: str
+    count: int
+
+
+class GuestDailyCount(BaseModel):
+    date: str
+    interviews: int
+    converted: int
+
+
+class AdminGuestSummaryOut(BaseModel):
+    total_interviews: int
+    interviews_today: int
+    daily_cap: int
+    completed: int
+    failed_or_cancelled: int
+    scored: int
+    average_score: float | None = None
+    converted: int
+    conversion_rate: float | None = None
+    archived: int
+    by_label: list[GuestLabelCount]
+    daily: list[GuestDailyCount]

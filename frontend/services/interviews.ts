@@ -140,7 +140,10 @@ export const interviewsApi = {
   },
   report(id: string) {
     return api<ReportOut>(`/interviews/${id}/report`);
+  },  adminReport(id: string) {
+    return api<ReportOut>(`/admin/interviews/${id}/report`, { retries: 0 });
   },
+
   feedback(id: string, rating: number, comments: string) {
     return api<{ rating: number }>(`/interviews/${id}/feedback`, {
       method: "POST",

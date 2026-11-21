@@ -9,7 +9,7 @@ from app.db.session import get_sessionmaker
 
 router = APIRouter(tags=["health"])
 
-EXPECTED_HEAD = "0005"
+EXPECTED_HEAD = "0006"
 
 
 def is_migration_up_to_date(migration: str | None, expected_head: str = EXPECTED_HEAD) -> bool:

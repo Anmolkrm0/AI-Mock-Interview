@@ -9,6 +9,7 @@ const deleteMock = vi.fn();
 vi.mock("@/services/interviews", () => ({
   interviewsApi: {
     report: (id: string) => reportMock(id),
+    adminReport: (id: string) => reportMock(id),
     recordingUrl: (id: string) => recordingUrlMock(id),
     delete: (id: string) => deleteMock(id),
   },
@@ -22,6 +23,7 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "test-int-1" }),
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
   usePathname: () => "/interview/test-int-1/report",
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("sonner", () => ({ toast: { warning: vi.fn(), error: vi.fn(), success: vi.fn() } }));

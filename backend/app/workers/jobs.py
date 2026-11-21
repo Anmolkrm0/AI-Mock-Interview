@@ -11,7 +11,7 @@ import logging
 from datetime import timedelta
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
@@ -246,6 +246,32 @@ async def cleanup_unclaimed_guests(
                     reason="guest_expired",
                 )
             )
+
+    # Keep each guest interview's outcome (no personal data) before the cascade deletes it,
+    # so the admin Guests numbers don't shrink after 48 hours.
+    await db.execute(
+        text(
+            """
+            INSERT INTO guest_interview_stats
+                (interview_id, created_at, job_role, duration_minutes, status,
+                 questions_total, questions_answered, overall_score)
+            SELECT i.id, i.created_at, i.job_role, i.duration_minutes, i.status,
+                   coalesce(qc.total, 0), coalesce(qc.answered, 0), r.overall_score
+            FROM interviews i
+            LEFT JOIN reports r ON r.interview_id = i.id
+            LEFT JOIN (
+                SELECT q.interview_id,
+                       count(*) AS total,
+                       count(*) FILTER (WHERE q.status = 'answered') AS answered
+                FROM questions q
+                GROUP BY q.interview_id
+            ) qc ON qc.interview_id = i.id
+            WHERE i.user_id = ANY(:uids) AND i.is_guest = true
+            ON CONFLICT (interview_id) DO NOTHING
+            """
+        ),
+        {"uids": user_ids},
+    )
 
     # Delete profiles (cascades delete documents, interviews, and child rows)
     for p in profiles:

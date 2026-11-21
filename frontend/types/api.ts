@@ -469,6 +469,8 @@ export interface AdminInterviewItem {
   questions_skipped: number;
   overall_score: number | null;
   feedback_rating: number | null;
+  is_guest?: boolean;
+  converted?: boolean;
 }
 
 export interface AdminInterviewListOut {
@@ -548,3 +550,29 @@ export interface AdminContactMessageListOut {
 
 
 
+
+export interface GuestLabelCount {
+  label: string;
+  count: number;
+}
+
+export interface GuestDailyCount {
+  date: string;
+  interviews: number;
+  converted: number;
+}
+
+export interface AdminGuestSummaryOut {
+  total_interviews: number;
+  interviews_today: number;
+  daily_cap: number;
+  completed: number;
+  failed_or_cancelled: number;
+  scored: number;
+  average_score: number | null;
+  converted: number;
+  conversion_rate: number | null;
+  archived: number;
+  by_label: GuestLabelCount[];
+  daily: GuestDailyCount[];
+}

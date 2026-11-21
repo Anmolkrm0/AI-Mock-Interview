@@ -2,7 +2,7 @@
 
 import { AlertTriangle, ChevronDown, Download, Lock, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -219,19 +219,23 @@ function Recording({ interviewId }: { interviewId: string }) {
 export default function ReportPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { data: report, error, loading, slow, reload } = useAsync<ReportOut>(() => interviewsApi.report(id), [id]);
+  const isAdminView = useSearchParams().get("admin") === "1";
+  const { data: report, error, loading, slow, reload } = useAsync<ReportOut>(
+    () => (isAdminView ? interviewsApi.adminReport(id) : interviewsApi.report(id)),
+    [id, isAdminView],
+  );
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    if (report && report.report_status !== "completed") router.replace(`/interview/${id}/processing`);
-  }, [report, id, router]);
+    if (report && report.report_status !== "completed" && !isAdminView) router.replace(`/interview/${id}/processing`);
+  }, [report, id, router, isAdminView]);
 
   useEffect(() => {
-    if (report && report.report_status === "completed") {
+    if (report && report.report_status === "completed" && !isAdminView) {
       trackOnce(`report_${id}_${report.locked ? "preview" : "full"}`, report.locked ? "report_preview_view" : "report_view");
     }
-  }, [report, id]);
+  }, [report, id, isAdminView]);
 
   async function handleDelete() {
     setDeleting(true);
@@ -381,7 +385,7 @@ export default function ReportPage() {
                   <Link href="/interview/setup" className={buttonVariants()}>
                     Practise again
                   </Link>
-                  <Button variant="danger" onClick={() => setConfirmDelete(true)}>
+                  <Button variant="danger" className={isAdminView ? "hidden" : undefined} onClick={() => setConfirmDelete(true)}>
                     <Trash2 /> Delete interview
                   </Button>
                 </div>
@@ -485,7 +489,7 @@ export default function ReportPage() {
                   <div>
                     <h2 className="text-2xl font-semibold">Was this useful?</h2>
                     <div className="mt-4">
-                      <FeedbackForm interviewId={id} initial={report.feedback} />
+                      {!isAdminView && <FeedbackForm interviewId={id} initial={report.feedback} />}
                     </div>
                   </div>
                 </section>
@@ -502,7 +506,7 @@ export default function ReportPage() {
                       <Download className="mr-2 size-4" /> Download PDF
                     </Button>
                   </div>
-                  <Button variant="danger" onClick={() => setConfirmDelete(true)}>
+                  <Button variant="danger" className={isAdminView ? "hidden" : undefined} onClick={() => setConfirmDelete(true)}>
                     <Trash2 /> Delete interview
                   </Button>
                 </div>

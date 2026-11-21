@@ -493,3 +493,18 @@ class ContactMessage(Base):
     )
     created_at: Mapped[datetime] = _created()
     handled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+
+
+class GuestInterviewStat(Base):
+    """Outcome of a guest interview kept after the guest account is deleted (no personal data)."""
+
+    __tablename__ = "guest_interview_stats"
+    interview_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    job_role: Mapped[str] = mapped_column(String(200), nullable=False)
+    duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    questions_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    questions_answered: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    overall_score: Mapped[float | None] = mapped_column(Float)
+    archived_at: Mapped[datetime] = _created()

@@ -22,8 +22,11 @@ from app.models import (
     AnswerAttempt,
     Document,
     EvaluationJob,
+    Feedback,
+    GuestInterviewStat,
     Interview,
     InterviewPlan,
+    Profile,
     Question,
     Recording,
     Report,
@@ -1092,6 +1095,7 @@ async def test_admin_me_and_access_control(client, monkeypatch) -> None:
         "/api/v1/admin/interviews",
         "/api/v1/admin/feedback",
         "/api/v1/admin/feedback/summary",
+        "/api/v1/admin/guests/summary",
     ]
 
     # 1. Unauthenticated -> 401
@@ -1126,6 +1130,9 @@ async def test_admin_me_and_access_control(client, monkeypatch) -> None:
 
     r_interviews = await client.get("/api/v1/admin/interviews", headers=headers)
     assert r_interviews.status_code == 200
+
+    r_guests = await client.get("/api/v1/admin/guests/summary", headers=headers)
+    assert r_guests.status_code == 200
 
 
 async def test_admin_dashboard_full_aggregates_and_privacy(client, monkeypatch) -> None:
@@ -1299,6 +1306,373 @@ async def test_admin_dashboard_full_aggregates_and_privacy(client, monkeypatch) 
         assert "I investigated a subtle race condition in production." not in resp_text
         assert "Jane Doe - Backend Engineer" not in resp_text
         assert "Senior Backend Engineer. We are hiring" not in resp_text
+
+
+async def test_admin_guest_summary_counts_live_and_archived_without_double_counting(
+    client, monkeypatch
+) -> None:
+    admin_email = "admin-guest@example.com"
+    monkeypatch.setattr(get_settings(), "admin_emails", [admin_email])
+    admin_user = uuid.uuid4()
+    admin_headers = {
+        "Authorization": f"Bearer {make_token(admin_user, email=admin_email, email_verified=True)}"
+    }
+
+    sessionmaker = get_sessionmaker()
+
+    guest_1_id = uuid.uuid4()
+    guest_2_id = uuid.uuid4()
+    i1_id = uuid.uuid4()
+    i2_id = uuid.uuid4()
+    i3_archived_id = uuid.uuid4()
+    reg_user_id = uuid.uuid4()
+    reg_i_id = uuid.uuid4()
+
+    async with sessionmaker() as session:
+        # 1. Live guest profile + interview with report
+        p1 = Profile(id=guest_1_id, is_anonymous=True, created_at=now_utc())
+        session.add(p1)
+        await session.flush()
+
+        iv1 = Interview(
+            id=i1_id,
+            user_id=guest_1_id,
+            job_role="Live Guest Role",
+            duration_minutes=10,
+            evaluation_rigor="standard",
+            status="completed",
+            is_guest=True,
+            created_at=now_utc(),
+        )
+        session.add(iv1)
+        await session.flush()
+
+        rep1 = Report(
+            interview_id=i1_id,
+            overall_score=92.0,
+            report_status="completed",
+        )
+        session.add(rep1)
+
+        # 2. Converted guest profile (is_anonymous=False) + guest interview with report
+        p2 = Profile(id=guest_2_id, is_anonymous=False, created_at=now_utc())
+        session.add(p2)
+        await session.flush()
+
+        iv2 = Interview(
+            id=i2_id,
+            user_id=guest_2_id,
+            job_role="Converted Guest Role",
+            duration_minutes=20,
+            evaluation_rigor="standard",
+            status="completed",
+            is_guest=True,
+            created_at=now_utc(),
+        )
+        session.add(iv2)
+        await session.flush()
+
+        rep2 = Report(
+            interview_id=i2_id,
+            overall_score=72.0,
+            report_status="completed",
+        )
+        session.add(rep2)
+
+        # 3. Regular non-guest interview (should NOT be included in guest summary)
+        p_reg = Profile(id=reg_user_id, is_anonymous=False, created_at=now_utc())
+        session.add(p_reg)
+        await session.flush()
+
+        iv_reg = Interview(
+            id=reg_i_id,
+            user_id=reg_user_id,
+            job_role="Registered Role",
+            duration_minutes=30,
+            evaluation_rigor="standard",
+            status="completed",
+            is_guest=False,
+            created_at=now_utc(),
+        )
+        session.add(iv_reg)
+        await session.flush()
+
+        # 4. Archived guest stat without live interview row (counted as archived)
+        archived_stat = GuestInterviewStat(
+            interview_id=i3_archived_id,
+            created_at=now_utc(),
+            job_role="Archived Guest Role",
+            duration_minutes=10,
+            status="completed",
+            questions_total=2,
+            questions_answered=2,
+            overall_score=50.0,
+        )
+        session.add(archived_stat)
+
+        # 5. Archived stat with duplicate ID matching live interview i1_id (MUST NOT be double counted!)
+        dup_stat = GuestInterviewStat(
+            interview_id=i1_id,
+            created_at=now_utc(),
+            job_role="Live Guest Role",
+            duration_minutes=10,
+            status="completed",
+            questions_total=2,
+            questions_answered=2,
+            overall_score=92.0,
+        )
+        session.add(dup_stat)
+
+        await session.commit()
+
+    # Query summary as admin
+    res = await client.get("/api/v1/admin/guests/summary", headers=admin_headers)
+    assert res.status_code == 200, res.text
+    data = res.json()
+
+    # Total should be 3 (iv1, iv2, i3_archived) - NOT 4 (duplicate i1_id in guest_interview_stats is excluded)
+    assert data["total_interviews"] == 3
+    assert data["interviews_today"] == 3
+    assert data["completed"] == 3
+    assert data["scored"] == 3
+    assert data["converted"] == 1  # only iv2
+    assert data["archived"] == 1   # only i3_archived
+    assert data["conversion_rate"] == 33.3  # 1/3 * 100
+    assert data["average_score"] == 71.3    # (92 + 72 + 50) / 3 = 71.333...
+
+    labels = {item["label"]: item["count"] for item in data["by_label"]}
+    assert labels["Excellent"] == 1  # 92.0
+    assert labels["Strong"] == 1     # 72.0
+    assert labels["Competent"] == 0
+    assert labels["Developing"] == 1 # 50.0
+    assert labels["Needs Improvement"] == 0
+
+    # Non-admin access check
+    non_admin_token = make_token(uuid.uuid4(), email="user@example.com", email_verified=True)
+    res_non_admin = await client.get(
+        "/api/v1/admin/guests/summary",
+        headers={"Authorization": f"Bearer {non_admin_token}"},
+    )
+    assert res_non_admin.status_code == 404
+
+
+async def test_admin_interview_report_access_and_full_report(client, monkeypatch) -> None:
+    admin_email = "admin-report@example.com"
+    monkeypatch.setattr(get_settings(), "admin_emails", [admin_email])
+    admin_user = uuid.uuid4()
+    admin_headers = {
+        "Authorization": f"Bearer {make_token(admin_user, email=admin_email, email_verified=True)}"
+    }
+
+    regular_user = uuid.uuid4()
+    reg_token = make_token(regular_user, email="candidate@example.com", email_verified=True)
+    reg_headers = {"Authorization": f"Bearer {reg_token}"}
+
+    sessionmaker = get_sessionmaker()
+    target_interview_id = uuid.uuid4()
+    no_report_interview_id = uuid.uuid4()
+
+    async with sessionmaker() as session:
+        # Create profile and interview
+        p = Profile(id=regular_user, is_anonymous=False)
+        session.add(p)
+        await session.flush()
+
+        iv = Interview(
+            id=target_interview_id,
+            user_id=regular_user,
+            job_role="Staff Systems Engineer",
+            duration_minutes=30,
+            evaluation_rigor="target_bar",
+            status="completed",
+        )
+        session.add(iv)
+
+        iv_no_rep = Interview(
+            id=no_report_interview_id,
+            user_id=regular_user,
+            job_role="Junior Developer",
+            duration_minutes=10,
+            evaluation_rigor="standard",
+            status="in_progress",
+        )
+        session.add(iv_no_rep)
+        await session.flush()
+
+        rep = Report(
+            interview_id=target_interview_id,
+            overall_score=88.0,
+            evidence_sufficiency="sufficient",
+            report_status="completed",
+            competency_scores=[{"competency": "Systems", "score": 90, "weight": 1.0}],
+            question_evaluations=[],
+            strengths=["Exceptional depth in distributed cache design."],
+            improvement_areas=["Could elaborate on observability."],
+            recommendations=["Practice explaining tradeoffs under tight latency bounds."],
+            summary="Strong systems design interview performance.",
+        )
+        session.add(rep)
+
+        fb = Feedback(
+            id=uuid.uuid4(),
+            user_id=regular_user,
+            interview_id=target_interview_id,
+            rating=5,
+            comments="Very realistic AI mock interview experience.",
+        )
+        session.add(fb)
+        await session.commit()
+
+    # 1. Unauthenticated -> 401
+    r_unauth = await client.get(f"/api/v1/admin/interviews/{target_interview_id}/report")
+    assert r_unauth.status_code == 401
+
+    # 2. Non-admin user -> 404
+    r_non_admin = await client.get(
+        f"/api/v1/admin/interviews/{target_interview_id}/report",
+        headers=reg_headers,
+    )
+    assert r_non_admin.status_code == 404
+
+    # 3. Admin accessing non-existent interview -> 404 INTERVIEW_NOT_FOUND
+    r_missing_iv = await client.get(
+        f"/api/v1/admin/interviews/{uuid.uuid4()}/report",
+        headers=admin_headers,
+    )
+    assert r_missing_iv.status_code == 404
+    assert r_missing_iv.json()["error"]["code"] == "INTERVIEW_NOT_FOUND"
+
+    # 4. Admin accessing interview without report -> 404 REPORT_NOT_FOUND
+    r_missing_rep = await client.get(
+        f"/api/v1/admin/interviews/{no_report_interview_id}/report",
+        headers=admin_headers,
+    )
+    assert r_missing_rep.status_code == 404
+    assert r_missing_rep.json()["error"]["code"] == "REPORT_NOT_FOUND"
+
+    # 5. Admin accessing existing interview with report -> 200 with full ReportOut
+    r_admin = await client.get(
+        f"/api/v1/admin/interviews/{target_interview_id}/report",
+        headers=admin_headers,
+    )
+    assert r_admin.status_code == 200
+    report_data = r_admin.json()
+    assert report_data["interview_id"] == str(target_interview_id)
+    assert report_data["overall_score"] == 88.0
+    assert report_data["overall_label"] == "Excellent"
+    assert report_data["locked"] is False
+    assert report_data["job_role"] == "Staff Systems Engineer"
+    assert report_data["duration_minutes"] == 30
+    assert report_data["evaluation_rigor"] == "target_bar"
+    assert report_data["summary"] == "Strong systems design interview performance."
+    assert "Exceptional depth in distributed cache design." in report_data["strengths"]
+    assert report_data["feedback"]["rating"] == 5
+    assert report_data["feedback"]["comments"] == "Very realistic AI mock interview experience."
+
+
+async def test_admin_interviews_audience_filter(client, monkeypatch) -> None:
+    admin_email = "admin-filter@example.com"
+    monkeypatch.setattr(get_settings(), "admin_emails", [admin_email])
+    admin_user = uuid.uuid4()
+    admin_headers = {
+        "Authorization": f"Bearer {make_token(admin_user, email=admin_email, email_verified=True)}"
+    }
+
+    sessionmaker = get_sessionmaker()
+
+    u_guest = uuid.uuid4()
+    u_converted = uuid.uuid4()
+    u_registered = uuid.uuid4()
+
+    iv_guest_id = uuid.uuid4()
+    iv_converted_id = uuid.uuid4()
+    iv_reg_id = uuid.uuid4()
+
+    async with sessionmaker() as session:
+        # Guest user (anonymous)
+        p1 = Profile(id=u_guest, is_anonymous=True)
+        session.add(p1)
+        await session.flush()
+        iv1 = Interview(
+            id=iv_guest_id,
+            user_id=u_guest,
+            job_role="Guest Developer",
+            duration_minutes=10,
+            evaluation_rigor="standard",
+            status="completed",
+            is_guest=True,
+        )
+        session.add(iv1)
+
+        # Converted guest user (profile is_anonymous=False, but interview is_guest=True)
+        p2 = Profile(id=u_converted, is_anonymous=False)
+        session.add(p2)
+        await session.flush()
+        iv2 = Interview(
+            id=iv_converted_id,
+            user_id=u_converted,
+            job_role="Converted Developer",
+            duration_minutes=20,
+            evaluation_rigor="standard",
+            status="completed",
+            is_guest=True,
+        )
+        session.add(iv2)
+
+        # Registered user (is_anonymous=False, interview is_guest=False)
+        p3 = Profile(id=u_registered, is_anonymous=False)
+        session.add(p3)
+        await session.flush()
+        iv3 = Interview(
+            id=iv_reg_id,
+            user_id=u_registered,
+            job_role="Registered Developer",
+            duration_minutes=30,
+            evaluation_rigor="target_bar",
+            status="completed",
+            is_guest=False,
+        )
+        session.add(iv3)
+        await session.commit()
+
+    # 1. No filter: returns all
+    r_all = await client.get("/api/v1/admin/interviews", headers=admin_headers)
+    assert r_all.status_code == 200
+    all_items = {item["id"]: item for item in r_all.json()["items"]}
+    assert str(iv_guest_id) in all_items
+    assert str(iv_converted_id) in all_items
+    assert str(iv_reg_id) in all_items
+
+    assert all_items[str(iv_guest_id)]["is_guest"] is True
+    assert all_items[str(iv_guest_id)]["converted"] is False
+
+    assert all_items[str(iv_converted_id)]["is_guest"] is True
+    assert all_items[str(iv_converted_id)]["converted"] is True
+
+    assert all_items[str(iv_reg_id)]["is_guest"] is False
+    assert all_items[str(iv_reg_id)]["converted"] is False
+
+    # 2. audience=guest: only guest interviews
+    r_guest = await client.get("/api/v1/admin/interviews?audience=guest", headers=admin_headers)
+    assert r_guest.status_code == 200
+    guest_ids = [item["id"] for item in r_guest.json()["items"]]
+    assert str(iv_guest_id) in guest_ids
+    assert str(iv_converted_id) in guest_ids
+    assert str(iv_reg_id) not in guest_ids
+    assert all(item["is_guest"] is True for item in r_guest.json()["items"])
+
+    # 3. audience=registered: only registered interviews
+    r_reg = await client.get("/api/v1/admin/interviews?audience=registered", headers=admin_headers)
+    assert r_reg.status_code == 200
+    reg_ids = [item["id"] for item in r_reg.json()["items"]]
+    assert str(iv_reg_id) in reg_ids
+    assert str(iv_guest_id) not in reg_ids
+    assert str(iv_converted_id) not in reg_ids
+    assert all(item["is_guest"] is False for item in r_reg.json()["items"])
+
+    # 4. Invalid audience value -> 422 Validation Error
+    r_invalid = await client.get("/api/v1/admin/interviews?audience=all", headers=admin_headers)
+    assert r_invalid.status_code == 422
 
 
 async def test_live_token_endpoint_does_not_call_document_or_planner_services(

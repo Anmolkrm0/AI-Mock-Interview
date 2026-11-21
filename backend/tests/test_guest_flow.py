@@ -12,7 +12,14 @@ from sqlalchemy import select
 from app.api.v1.health import is_migration_up_to_date
 from app.core.config import get_settings
 from app.db.session import get_sessionmaker
-from app.models import Profile, StorageCleanupTask
+from app.models import (
+    GuestInterviewStat,
+    Interview,
+    Profile,
+    Question,
+    Report,
+    StorageCleanupTask,
+)
 from app.workers.jobs import cleanup_unclaimed_guests
 from tests.conftest import make_token
 from tests.test_api_integration import DOCX_MIME, JD, RESUME, docx_bytes, drain_jobs, ev
@@ -517,3 +524,97 @@ async def test_worker_cleanup_unclaimed_guests(client: AsyncClient, fakes) -> No
             ).scalars()
         )
         assert len(tasks) >= 1
+
+
+@pytest.mark.asyncio
+async def test_cleanup_archives_guest_interview_then_deletes_it(client: AsyncClient, fakes) -> None:
+    _, storage = fakes
+    settings = get_settings()
+    sessionmaker = get_sessionmaker()
+
+    guest_id = uuid.uuid4()
+    interview_id = uuid.uuid4()
+    report_id = uuid.uuid4()
+
+    # Create expired guest profile with an interview, report, and questions
+    async with sessionmaker() as db:
+        prof = Profile(
+            id=guest_id,
+            is_anonymous=True,
+            created_at=datetime.now(UTC) - timedelta(hours=50),
+        )
+        db.add(prof)
+        await db.flush()
+
+        interview = Interview(
+            id=interview_id,
+            user_id=guest_id,
+            is_guest=True,
+            job_role="Senior Python Developer",
+            duration_minutes=20,
+            status="completed",
+            evaluation_rigor="standard",
+            recording_mode="none",
+            created_at=datetime.now(UTC) - timedelta(hours=49),
+        )
+        db.add(interview)
+        await db.flush()
+
+        q1 = Question(
+            id=uuid.uuid4(),
+            interview_id=interview_id,
+            sequence_number=1,
+            question_text="Describe a complex system you designed.",
+            competency="System Design",
+            difficulty=4,
+            question_type="technical",
+            status="answered",
+        )
+        q2 = Question(
+            id=uuid.uuid4(),
+            interview_id=interview_id,
+            sequence_number=2,
+            question_text="How do you handle ambiguous requirements?",
+            competency="Communication",
+            difficulty=3,
+            question_type="behavioral",
+            status="skipped",
+        )
+        db.add_all([q1, q2])
+
+        report = Report(
+            id=report_id,
+            interview_id=interview_id,
+            report_status="completed",
+            overall_score=78.5,
+            evidence_sufficiency="sufficient",
+        )
+        db.add(report)
+        await db.commit()
+
+    class FakeAuthHttpClient:
+        async def delete(self, url: str, headers: dict) -> None:
+            pass
+
+    async with sessionmaker() as db:
+        cleaned = await cleanup_unclaimed_guests(db, storage, settings, http_client=FakeAuthHttpClient())
+        assert cleaned >= 1
+
+    # Verify guest profile, interview, and report are deleted
+    async with sessionmaker() as db:
+        assert (await db.get(Profile, guest_id)) is None
+        assert (await db.get(Interview, interview_id)) is None
+        assert (await db.get(Report, report_id)) is None
+
+        # Verify outcome was archived into guest_interview_stats
+        stat = await db.get(GuestInterviewStat, interview_id)
+        assert stat is not None
+        assert stat.interview_id == interview_id
+        assert stat.job_role == "Senior Python Developer"
+        assert stat.duration_minutes == 20
+        assert stat.status == "completed"
+        assert stat.questions_total == 2
+        assert stat.questions_answered == 1
+        assert stat.overall_score == 78.5
+        assert stat.archived_at is not None
+

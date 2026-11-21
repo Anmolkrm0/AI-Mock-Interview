@@ -53,6 +53,8 @@ export default function PrivacyPage() {
               <ul className="list-disc pl-5 space-y-1">
                 <li>Only your most recent audio recording is preserved. When a new recording is made, older recordings are scheduled for immediate background deletion.</li>
                 <li>Guests do not have recordings retained.</li>
+                <li>If you try a free interview without signing up, your account, resume and report are deleted after 48 hours. We keep only an anonymous summary (role, status and score) to count how the free interview is used.</li>
+                <li>Our team may review interview reports to answer support requests and improve question and scoring quality.</li>
                 <li>You can delete your documents and recordings at any time from your settings.</li>
               </ul>
             </section>

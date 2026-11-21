@@ -103,6 +103,7 @@ def migrated_db() -> str:
 
 
 TABLES = [
+    "guest_interview_stats",
     "contact_messages",
     "credit_ledger",
     "payment_orders",

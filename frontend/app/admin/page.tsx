@@ -11,6 +11,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
 import { FeedbackView } from "@/components/admin/feedback-view";
+import { GuestsView } from "@/components/admin/guests-view";
 import { MessagesView } from "@/components/admin/messages-view";
 import { PaymentsView } from "@/components/admin/payments-view";
 import { AppHeader } from "@/components/common/app-header";
@@ -29,7 +30,7 @@ import type {
   DailySeriesPoint,
 } from "@/types/api";
 
-type TabKey = "overview" | "users" | "interviews" | "feedback" | "payments" | "messages";
+type TabKey = "overview" | "users" | "interviews" | "guests" | "feedback" | "payments" | "messages";
 
 function formatIST(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -85,7 +86,7 @@ function AdminDashboard() {
   const searchParams = useSearchParams();
   const initialTab = (searchParams.get("tab") as TabKey) || "overview";
 
-  const validTabs: TabKey[] = ["overview", "users", "interviews", "feedback", "payments", "messages"];
+  const validTabs: TabKey[] = ["overview", "users", "interviews", "guests", "feedback", "payments", "messages"];
   const [activeTab, setActiveTab] = useState<TabKey>(
     validTabs.includes(initialTab) ? initialTab : "overview",
   );
@@ -167,6 +168,7 @@ function AdminDashboard() {
                 { key: "overview", label: "Overview" },
                 { key: "users", label: "Users" },
                 { key: "interviews", label: "Interviews" },
+                { key: "guests", label: "Free interviews" },
                 { key: "feedback", label: "Feedback" },
                 { key: "payments", label: "Payments" },
                 { key: "messages", label: "Messages" },
@@ -198,6 +200,7 @@ function AdminDashboard() {
           {activeTab === "overview" && <OverviewTab />}
           {activeTab === "users" && <UsersTab />}
           {activeTab === "interviews" && <InterviewsTab />}
+          {activeTab === "guests" && <GuestsView />}
           {activeTab === "feedback" && <FeedbackView embedded />}
           {activeTab === "payments" && <PaymentsView />}
           {activeTab === "messages" && <MessagesView />}
